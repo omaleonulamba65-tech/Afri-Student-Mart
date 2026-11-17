@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
 import { Flag, Heart, MapPin, MessageCircle, Rocket, ShoppingBag, Star, Video } from 'lucide-react';
+import {
+  getCountryByDialCode,
+  getCountryConfig,
+  getCountryDisplayName,
+} from '../data/languages';
 import { formatTimeAgo } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
 import type { MarketplaceItem } from '../types';
@@ -30,6 +35,9 @@ export const ItemCard: React.FC<ItemCardProps> = ({
   const [imgError, setImgError] = useState(false);
   // Use 200px / <=30KB thumbnail for fast list rendering; full 800px loads only on click
   const photo = item.thumbnails?.[0] || item.photos?.[0];
+  const itemCountryCfg = item.country
+    ? getCountryConfig(item.country)
+    : getCountryByDialCode(item.country_code);
 
   return (
     <article className="flex flex-col rounded-2xl border border-slate-200 bg-white overflow-hidden">
@@ -148,9 +156,17 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               : item.institution}
           </div>
           <div className="flex items-center justify-between gap-2 text-slate-500 truncate">
-            <span className="inline-flex items-center gap-1 truncate">
-              <MapPin className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-              <span className="truncate">{item.location}</span>
+            <span className="inline-flex items-center gap-1.5 truncate">
+              <span
+                className="text-lg leading-none shrink-0"
+                title={getCountryDisplayName(itemCountryCfg.country)}
+                aria-label={getCountryDisplayName(itemCountryCfg.country)}
+              >
+                {itemCountryCfg.flag}
+              </span>
+              <span className="truncate font-semibold text-slate-700">
+                {getCountryDisplayName(itemCountryCfg.country)} · {item.location}
+              </span>
             </span>
             {typeof item.distance_km === 'number' && item.distance_km <= 2.0 && (
               <span className="rounded bg-green-50 border border-green-200 px-1.5 py-0.5 text-[10px] font-bold text-green-800 shrink-0 tabular-nums">

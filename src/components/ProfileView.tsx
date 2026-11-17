@@ -22,7 +22,12 @@ import {
 } from 'lucide-react';
 import { Globe } from 'lucide-react';
 import { NIGERIAN_INSTITUTIONS } from '../data/institutions';
-import { COUNTRY_LANGUAGE_CONFIGS, getCountryConfig } from '../data/languages';
+import {
+  COUNTRY_LANGUAGE_CONFIGS,
+  getCountryByDialCode,
+  getCountryConfig,
+  getCountryDisplayName,
+} from '../data/languages';
 import { EXACT_SAFETY_MESSAGES } from '../data/policies';
 import { api, buildWhatsAppShareUrl, compressImageFile } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
@@ -849,6 +854,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
             <BadgeRow badges={user.badges} size="sm" />
             <p className="text-xs font-semibold text-green-800 truncate">{user.institution}</p>
+            <p className="text-xs font-bold text-slate-700 inline-flex items-center gap-1.5">
+              <span className="text-xl leading-none" aria-hidden="true">
+                {(user.country ? getCountryConfig(user.country) : getCountryByDialCode(user.country_code)).flag}
+              </span>
+              <span>
+                {getCountryDisplayName(
+                  (user.country ? getCountryConfig(user.country) : getCountryByDialCode(user.country_code)).country
+                )}
+              </span>
+            </p>
             <p className="text-xs text-slate-500">
               Private Phone ID:{' '}
               <span className="font-mono font-semibold">
@@ -998,7 +1013,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               )}
               {NIGERIAN_INSTITUTIONS.map((inst) => (
                 <option key={inst.name} value={inst.name}>
-                  {inst.name}{inst.country ? ` — ${inst.country}` : ''}
+                  {inst.country ? `${getCountryConfig(inst.country).flag} ` : ''}
+                  {inst.name}
+                  {inst.country ? ` — ${getCountryDisplayName(inst.country)}` : ''}
                 </option>
               ))}
             </select>
@@ -1045,9 +1062,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {t('language_settings')}
             </h3>
           </div>
-          <span className="text-xs font-extrabold text-green-800">
-            {countryConfig.flag} {settingsCountry} · {settingsLanguage}
-            {savingLang ? ' ...' : ''}
+          <span className="text-xs font-extrabold text-green-800 inline-flex items-center gap-1.5">
+            <span className="text-xl leading-none" aria-hidden="true">
+              {activeSettingsCountryCfg.flag}
+            </span>
+            <span>
+              {getCountryDisplayName(settingsCountry)} · {settingsLanguage}
+              {savingLang ? ' ...' : ''}
+            </span>
           </span>
         </div>
 
@@ -1062,11 +1084,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               const nextLang = cfg.languages[0] || 'English';
               handleLanguageSwitch(cfg.country, nextLang);
             }}
-            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900 focus:border-green-700 focus:outline-none"
+            className="w-full min-h-[46px] rounded-xl border border-slate-300 bg-white px-3 text-base font-bold text-slate-900 focus:border-green-700 focus:outline-none"
           >
             {COUNTRY_LANGUAGE_CONFIGS.map((cfg) => (
               <option key={cfg.country} value={cfg.country}>
-                {cfg.flag} {cfg.country} ({cfg.currencySymbol})
+                {cfg.flag} {getCountryDisplayName(cfg.country)} ({cfg.currencySymbol.trim()})
               </option>
             ))}
           </select>

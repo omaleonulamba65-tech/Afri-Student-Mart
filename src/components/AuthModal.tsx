@@ -21,7 +21,11 @@ import {
   NIGERIAN_STATES,
   getInstitutionsByCountry,
 } from '../data/institutions';
-import { COUNTRY_LANGUAGE_CONFIGS, getCountryConfig } from '../data/languages';
+import {
+  COUNTRY_LANGUAGE_CONFIGS,
+  getCountryConfig,
+  getCountryDisplayName,
+} from '../data/languages';
 import { ALL_MARKET_NAMES } from '../data/markets';
 import { EXACT_SAFETY_MESSAGES } from '../data/policies';
 import { api, compressImageFile } from '../lib/api';
@@ -411,7 +415,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     value={countryCode}
                     onChange={(e) => setCountryCode(e.target.value)}
                     aria-label="Country code"
-                    className="w-28 min-h-[48px] rounded-xl border border-slate-300 bg-white px-2 text-sm font-semibold text-slate-800 focus:border-green-700 focus:outline-none shrink-0"
+                    className="w-32 min-h-[48px] rounded-xl border border-slate-300 bg-white px-2 text-base font-semibold text-slate-800 focus:border-green-700 focus:outline-none shrink-0"
                   >
                     {WEST_AND_SOUTH_AFRICA_COUNTRIES.map((c) => (
                       <option key={c.code} value={c.code}>
@@ -514,11 +518,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <select
                       value={signupCountry}
                       onChange={(e) => handleSelectSignupCountry(e.target.value)}
-                      className="w-full min-h-[48px] rounded-xl border-2 border-green-700/40 bg-white px-3 text-sm font-bold text-slate-900 focus:border-green-700 focus:outline-none"
+                      className="w-full min-h-[50px] rounded-xl border-2 border-green-700/40 bg-white px-3 text-base font-bold text-slate-900 focus:border-green-700 focus:outline-none"
                     >
                       {COUNTRY_LANGUAGE_CONFIGS.map((cfg) => (
                         <option key={cfg.country} value={cfg.country}>
-                          {cfg.flag} {cfg.country} ({cfg.dialCode} · {cfg.currencySymbol})
+                          {cfg.flag} {getCountryDisplayName(cfg.country)} ({cfg.dialCode} · {cfg.currencySymbol.trim()})
                         </option>
                       ))}
                     </select>
@@ -580,8 +584,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <h2 className="text-lg font-extrabold text-slate-900">
                         {t('step2_details')}
                       </h2>
-                      <p className="text-xs text-slate-600">
-                        {activeSignupCountryCfg.flag} {signupCountry} · {signupLanguage}
+                      <p className="text-xs text-slate-600 inline-flex items-center gap-1.5">
+                        <span className="text-lg leading-none" aria-hidden="true">
+                          {activeSignupCountryCfg.flag}
+                        </span>
+                        <span>
+                          {getCountryDisplayName(signupCountry)} · {signupLanguage}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -609,11 +618,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         value={countryCode}
                         onChange={(e) => setCountryCode(e.target.value)}
                         aria-label="Country code"
-                        className="w-36 min-h-[48px] rounded-xl border border-slate-300 bg-white px-2 text-xs sm:text-sm font-semibold text-slate-800 focus:border-green-700 focus:outline-none shrink-0"
+                        className="w-44 sm:w-48 min-h-[48px] rounded-xl border border-slate-300 bg-white px-2 text-sm sm:text-base font-semibold text-slate-800 focus:border-green-700 focus:outline-none shrink-0"
                       >
                         {WEST_AND_SOUTH_AFRICA_COUNTRIES.map((c) => (
                           <option key={c.code} value={c.code}>
-                            {c.country} ({c.code})
+                            {c.flag} {c.displayName} ({c.code})
                           </option>
                         ))}
                       </select>

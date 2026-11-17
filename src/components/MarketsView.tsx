@@ -9,7 +9,11 @@ import {
   Store,
 } from 'lucide-react';
 import { MARKET_GROUPS, MarketLocationGroup, MarketRegion } from '../data/markets';
-import { COUNTRY_LANGUAGE_CONFIGS } from '../data/languages';
+import {
+  COUNTRY_LANGUAGE_CONFIGS,
+  getCountryConfig,
+  getCountryDisplayName,
+} from '../data/languages';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
 import type { MarketplaceItem, TraderShop } from '../types';
@@ -171,9 +175,11 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
 
         <section className="rounded-3xl bg-gradient-to-br from-green-800 to-green-900 text-white p-5 sm:p-7 space-y-2">
           <div className="inline-flex items-center gap-1.5 rounded-lg bg-yellow-400 text-green-950 px-2.5 py-1 text-xs font-extrabold">
-            <MapPin className="w-3.5 h-3.5" />
+            <span className="text-lg leading-none" aria-hidden="true">
+              {getCountryConfig(selectedMarket.country).flag}
+            </span>
             <span>
-              {selectedMarket.stateOrCity} · {selectedMarket.country}
+              {selectedMarket.stateOrCity} · {getCountryDisplayName(selectedMarket.country)}
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold">{selectedMarket.name}</h1>
@@ -297,8 +303,21 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
       <section className="rounded-3xl bg-gradient-to-br from-green-800 via-green-700 to-green-900 text-white p-5 sm:p-7 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-yellow-300">
-              {countryFilter === 'All' ? t('all_countries') : countryFilter} · West &amp; South Africa
+            <p className="text-xs font-bold uppercase tracking-wider text-yellow-300 inline-flex items-center gap-1.5">
+              {countryFilter === 'All' ? (
+                <>
+                  <span className="text-base leading-none" aria-hidden="true">🌍</span>
+                  <span>{t('all_countries')}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-lg leading-none" aria-hidden="true">
+                    {getCountryConfig(countryFilter).flag}
+                  </span>
+                  <span>{getCountryDisplayName(countryFilter)}</span>
+                </>
+              )}{' '}
+              · West &amp; South Africa
             </p>
             <h1 className="text-2xl sm:text-3xl font-extrabold mt-0.5">{t('markets_directory')}</h1>
             <p className="text-sm text-green-50 mt-1">{t('markets_sub')}</p>
@@ -339,7 +358,13 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
                   : 'bg-white text-slate-800 border-slate-300 hover:border-green-700'
               }`}
             >
-              <Globe2 className="w-3.5 h-3.5" />
+              {reg === 'Nigeria' ? (
+                <span className="text-lg leading-none" aria-hidden="true">🇳🇬</span>
+              ) : reg === 'South Africa' ? (
+                <span className="text-lg leading-none" aria-hidden="true">🇿🇦</span>
+              ) : (
+                <Globe2 className="w-4 h-4" />
+              )}
               <span>{reg === 'All' ? t('all_countries') : reg}</span>
             </button>
           ))}
@@ -359,12 +384,12 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
                 setRegionFilter('All');
                 setStateFilter('All');
               }}
-              className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-900 focus:border-green-700 focus:outline-none"
+              className="w-full min-h-[46px] rounded-xl border border-slate-300 bg-white px-3 text-base font-semibold text-slate-900 focus:border-green-700 focus:outline-none"
             >
-              <option value="All">{t('all_countries')}</option>
+              <option value="All">🌍 {t('all_countries')}</option>
               {COUNTRY_LANGUAGE_CONFIGS.map((c) => (
                 <option key={c.country} value={c.country}>
-                  {c.country} ({c.dialCode})
+                  {c.flag} {getCountryDisplayName(c.country)} ({c.dialCode})
                 </option>
               ))}
             </select>
@@ -418,13 +443,16 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
               className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 space-y-3"
             >
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="w-8 h-8 rounded-xl bg-green-100 text-green-800 flex items-center justify-center shrink-0">
-                    <MapPin className="w-4 h-4" />
+                <div className="flex items-center gap-2.5">
+                  <span className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center shrink-0 text-xl leading-none" aria-hidden="true">
+                    {getCountryConfig(group.country).flag}
                   </span>
                   <div>
                     <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
                       {group.stateOrCity}
+                      {group.stateOrCity.toLowerCase() !== group.country.toLowerCase()
+                        ? ` (${getCountryDisplayName(group.country)})`
+                        : ''}
                     </h2>
                     <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
                       {group.region} · {group.markets.length} market

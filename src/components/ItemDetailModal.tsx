@@ -21,6 +21,11 @@ import {
   X,
 } from 'lucide-react';
 import {
+  getCountryByDialCode,
+  getCountryConfig,
+  getCountryDisplayName,
+} from '../data/languages';
+import {
   api,
   buildWhatsAppShareUrl,
   compressAndValidateVideo,
@@ -126,6 +131,9 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
   if (!item) return null;
 
   const activeItem = fullItem || item;
+  const itemCountryCfg = activeItem.country
+    ? getCountryConfig(activeItem.country)
+    : getCountryByDialCode(activeItem.country_code);
   const loadHeavyMedia = () => {
     setRevealInLowData(true);
     setLoadingFull(true);
@@ -477,7 +485,15 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                 <span className="font-bold text-slate-800">Condition:</span> {activeItem.condition}
               </div>
               <div>
-                <span className="font-bold text-slate-800">Location:</span> {activeItem.location}
+                <span className="font-bold text-slate-800">Location:</span>{' '}
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="text-lg leading-none" aria-hidden="true">
+                    {itemCountryCfg.flag}
+                  </span>
+                  <span>
+                    {getCountryDisplayName(itemCountryCfg.country)} · {activeItem.location}
+                  </span>
+                </span>
               </div>
               <div>
                 <span className="font-bold text-slate-800">Payment:</span> Paystack Escrow Only
@@ -531,9 +547,13 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                 <span className="tabular-nums font-semibold">{activeItem.seller_items_count} active</span>
               </div>
             </div>
-            <div className="flex items-center gap-1 text-xs text-slate-600">
-              <MapPin className="w-3.5 h-3.5 shrink-0 text-green-700" />
-              <span>Pickup Area: {activeItem.location}</span>
+            <div className="flex items-center gap-1.5 text-xs text-slate-700 font-semibold">
+              <span className="text-lg leading-none shrink-0" aria-hidden="true">
+                {itemCountryCfg.flag}
+              </span>
+              <span>
+                {getCountryDisplayName(itemCountryCfg.country)} · Pickup Area: {activeItem.location}
+              </span>
             </div>
 
             {/* Trust Score Rating + 5-sec Video Review after Delivery */}

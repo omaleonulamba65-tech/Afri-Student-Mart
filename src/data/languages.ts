@@ -1,5 +1,6 @@
 export interface CountryLanguageConfig {
   country: string;
+  displayName?: string;
   dialCode: string;
   flag: string;
   currencySymbol: string;
@@ -13,7 +14,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Nigeria',
     dialCode: '+234',
-    flag: 'NG',
+    flag: '🇳🇬',
     currencySymbol: '₦',
     currencyCode: 'NGN',
     deliveryFeeSameCity: 500,
@@ -47,7 +48,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Ghana',
     dialCode: '+233',
-    flag: 'GH',
+    flag: '🇬🇭',
     currencySymbol: 'GH₵',
     currencyCode: 'GHS',
     deliveryFeeSameCity: 20,
@@ -76,7 +77,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Senegal',
     dialCode: '+221',
-    flag: 'SN',
+    flag: '🇸🇳',
     currencySymbol: 'CFA ',
     currencyCode: 'XOF',
     deliveryFeeSameCity: 1000,
@@ -96,8 +97,9 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   },
   {
     country: 'Ivory Coast',
+    displayName: "Côte d'Ivoire",
     dialCode: '+225',
-    flag: 'CI',
+    flag: '🇨🇮',
     currencySymbol: 'CFA ',
     currencyCode: 'XOF',
     deliveryFeeSameCity: 1000,
@@ -120,7 +122,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Mali',
     dialCode: '+223',
-    flag: 'ML',
+    flag: '🇲🇱',
     currencySymbol: 'CFA ',
     currencyCode: 'XOF',
     deliveryFeeSameCity: 1000,
@@ -142,7 +144,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Burkina Faso',
     dialCode: '+226',
-    flag: 'BF',
+    flag: '🇧🇫',
     currencySymbol: 'CFA ',
     currencyCode: 'XOF',
     deliveryFeeSameCity: 1000,
@@ -164,7 +166,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Niger',
     dialCode: '+227',
-    flag: 'NE',
+    flag: '🇳🇪',
     currencySymbol: 'CFA ',
     currencyCode: 'XOF',
     deliveryFeeSameCity: 1000,
@@ -184,7 +186,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Togo',
     dialCode: '+228',
-    flag: 'TG',
+    flag: '🇹🇬',
     currencySymbol: 'CFA ',
     currencyCode: 'XOF',
     deliveryFeeSameCity: 1000,
@@ -206,7 +208,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Benin',
     dialCode: '+229',
-    flag: 'BJ',
+    flag: '🇧🇯',
     currencySymbol: 'CFA ',
     currencyCode: 'XOF',
     deliveryFeeSameCity: 1000,
@@ -231,7 +233,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Sierra Leone',
     dialCode: '+232',
-    flag: 'SL',
+    flag: '🇸🇱',
     currencySymbol: 'Le ',
     currencyCode: 'SLE',
     deliveryFeeSameCity: 25,
@@ -254,7 +256,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Liberia',
     dialCode: '+231',
-    flag: 'LR',
+    flag: '🇱🇷',
     currencySymbol: 'L$',
     currencyCode: 'LRD',
     deliveryFeeSameCity: 300,
@@ -277,7 +279,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Guinea',
     dialCode: '+224',
-    flag: 'GN',
+    flag: '🇬🇳',
     currencySymbol: 'GNF ',
     currencyCode: 'GNF',
     deliveryFeeSameCity: 15000,
@@ -298,7 +300,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Gambia',
     dialCode: '+220',
-    flag: 'GM',
+    flag: '🇬🇲',
     currencySymbol: 'D',
     currencyCode: 'GMD',
     deliveryFeeSameCity: 100,
@@ -318,8 +320,9 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   },
   {
     country: 'Cape Verde',
+    displayName: 'Cabo Verde',
     dialCode: '+238',
-    flag: 'CV',
+    flag: '🇨🇻',
     currencySymbol: 'CVE ',
     currencyCode: 'CVE',
     deliveryFeeSameCity: 250,
@@ -335,7 +338,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Guinea-Bissau',
     dialCode: '+245',
-    flag: 'GW',
+    flag: '🇬🇼',
     currencySymbol: 'CFA ',
     currencyCode: 'XOF',
     deliveryFeeSameCity: 1000,
@@ -357,7 +360,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'South Africa',
     dialCode: '+27',
-    flag: 'ZA',
+    flag: '🇿🇦',
     currencySymbol: 'R',
     currencyCode: 'ZAR',
     deliveryFeeSameCity: 50,
@@ -382,7 +385,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
   {
     country: 'Mauritania',
     dialCode: '+222',
-    flag: 'MR',
+    flag: '🇲🇷',
     currencySymbol: 'MRU ',
     currencyCode: 'MRU',
     deliveryFeeSameCity: 100,
@@ -1305,7 +1308,7 @@ const FRANCOPHONE_COUNTRIES = new Set([
   'Guinea',
 ]);
 
-const LUSOPHONE_COUNTRIES = new Set(['Cape Verde', 'Guinea-Bissau']);
+const LUSOPHONE_COUNTRIES = new Set(['Cape Verde', 'Cabo Verde', 'Guinea-Bissau']);
 
 export function getDictionaryForLanguage(language: string, country?: string): TranslationDict {
   if (LANGUAGE_DICT_MAP[language]) return LANGUAGE_DICT_MAP[language];
@@ -1319,10 +1322,19 @@ export function getCountryConfig(countryName?: string): CountryLanguageConfig {
   const found = COUNTRY_LANGUAGE_CONFIGS.find(
     (c) =>
       c.country.toLowerCase() === clean ||
+      (c.displayName || '').toLowerCase() === clean ||
       (clean.includes('ivory') && c.country === 'Ivory Coast') ||
-      (clean.includes('côte') && c.country === 'Ivory Coast')
+      ((clean.includes('côte') || clean.includes('cote')) && c.country === 'Ivory Coast') ||
+      ((clean.includes('cabo') || clean.includes('cape')) && c.country === 'Cape Verde')
   );
   return found || COUNTRY_LANGUAGE_CONFIGS[0];
+}
+
+export function getCountryDisplayName(countryName?: string): string {
+  if (!countryName) return 'Nigeria';
+  if (countryName === 'All') return 'All Countries';
+  const cfg = getCountryConfig(countryName);
+  return cfg.displayName || cfg.country;
 }
 
 export function getCountryByDialCode(dialCode?: string): CountryLanguageConfig {

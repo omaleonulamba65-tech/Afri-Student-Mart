@@ -29,7 +29,11 @@ import { LanguagePickerModal } from './components/LanguagePickerModal';
 import { BrandLogo } from './components/Logo';
 import heroCampusMarketImg from './assets/images/hero_campus_market_1794758659851.jpg';
 import { getInstitutionsByCountry } from './data/institutions';
-import { COUNTRY_LANGUAGE_CONFIGS } from './data/languages';
+import {
+  COUNTRY_LANGUAGE_CONFIGS,
+  getCountryConfig,
+  getCountryDisplayName,
+} from './data/languages';
 import {
   api,
   getCachedItems,
@@ -947,16 +951,26 @@ export default function App() {
                   </div>
                 </section>
 
-                {/* Active Country Switcher Banner: "You are viewing: Nigeria [Change] [All Countries]" */}
+                {/* Active Country Switcher Banner */}
                 <section className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
                   <div className="flex items-center gap-2 font-bold text-slate-900">
                     <Globe2 className="w-4 h-4 text-green-700 shrink-0" />
-                    <span>
-                      {t('you_are_viewing')}:{' '}
-                      <strong className="text-green-800">
-                        {country === 'All'
-                          ? `🌍 ${t('all_countries')}`
-                          : `${countryConfig.flag} ${country}`}
+                    <span className="inline-flex items-center gap-1.5 flex-wrap">
+                      <span>{t('you_are_viewing')}:</span>
+                      <strong className="text-green-800 inline-flex items-center gap-1.5">
+                        {country === 'All' ? (
+                          <>
+                            <span className="text-xl leading-none" aria-hidden="true">🌍</span>
+                            <span>{t('all_countries')}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-xl sm:text-2xl leading-none" aria-hidden="true">
+                              {countryConfig.flag}
+                            </span>
+                            <span>{getCountryDisplayName(country)}</span>
+                          </>
+                        )}
                       </strong>
                     </span>
                     <span className="text-xs text-slate-500 font-semibold">
@@ -968,12 +982,12 @@ export default function App() {
                       aria-label={t('country_label')}
                       value={country}
                       onChange={(e) => setCountryOnly(e.target.value)}
-                      className="min-h-[34px] rounded-lg border border-slate-300 bg-slate-50 px-2 text-xs font-bold text-slate-800"
+                      className="min-h-[38px] rounded-lg border border-slate-300 bg-slate-50 px-2.5 text-sm sm:text-base font-bold text-slate-800"
                     >
                       <option value="All">🌍 {t('all_countries')}</option>
                       {COUNTRY_LANGUAGE_CONFIGS.map((cfg) => (
                         <option key={cfg.country} value={cfg.country}>
-                          {cfg.flag} {cfg.country}
+                          {cfg.flag} {getCountryDisplayName(cfg.country)}
                         </option>
                       ))}
                     </select>
@@ -1276,7 +1290,9 @@ export default function App() {
                       <option value="All">{t('all_schools_markets')}</option>
                       {homeInstitutions.map((inst) => (
                         <option key={inst.name} value={inst.name}>
-                          {inst.name}{inst.country ? ` — ${inst.country}` : ''}
+                          {inst.country ? `${getCountryConfig(inst.country).flag} ` : ''}
+                          {inst.name}
+                          {inst.country ? ` — ${getCountryDisplayName(inst.country)}` : ''}
                         </option>
                       ))}
                     </select>

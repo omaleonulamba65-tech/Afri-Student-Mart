@@ -12,12 +12,25 @@ import {
   Star,
   Store,
 } from 'lucide-react';
-import { ALL_MARKET_NAMES } from '../data/markets';
+import { getCountryConfig, getCountryDisplayName } from '../data/languages';
+import { ALL_MARKET_NAMES, MARKET_GROUPS } from '../data/markets';
 import { api, compressImageFile } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
 import type { AdSettings, MarketplaceItem, PublicUser, TraderShop } from '../types';
 import { VerifiedBadge } from './BadgePill';
 import { PaystackFeeModal, PaystackFeeRequest } from './PaystackFeeModal';
+
+function resolveShopCountry(shop: TraderShop) {
+  const fromProd = shop.products?.[0]?.country;
+  if (fromProd) return getCountryConfig(fromProd);
+  const marketLower = (shop.market || '').toLowerCase();
+  const group = MARKET_GROUPS.find((g) =>
+    g.markets.some((m) => marketLower.includes(m.toLowerCase())) ||
+    marketLower.includes(g.country.toLowerCase()) ||
+    marketLower.includes(g.stateOrCity.toLowerCase())
+  );
+  return getCountryConfig(group?.country || 'Nigeria');
+}
 
 interface ShopViewProps {
   user: PublicUser | null;
@@ -180,6 +193,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   if (selectedShop) {
     const waUrl = buildShopWhatsAppUrl(selectedShop);
     const isOwnShop = Boolean(user && user.id === selectedShop.owner_id);
+    const shopCountryCfg = resolveShopCountry(selectedShop);
     return (
       <div className="space-y-5 pb-8">
         <button
@@ -221,11 +235,17 @@ export const ShopView: React.FC<ShopViewProps> = ({
                   </h1>
                   <VerifiedBadge badge="trader" size="sm" />
                 </div>
-                <p className="text-sm text-slate-600">
-                  Owner: <strong className="text-slate-900">{selectedShop.owner_name}</strong> ·{' '}
-                  <span className="inline-flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5 text-orange-500" />
-                    {selectedShop.market}
+                <p className="text-sm text-slate-600 flex flex-wrap items-center gap-1.5">
+                  <span>
+                    Owner: <strong className="text-slate-900">{selectedShop.owner_name}</strong> ·
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-slate-800">
+                    <span className="text-xl leading-none" aria-hidden="true">
+                      {shopCountryCfg.flag}
+                    </span>
+                    <span>
+                      {getCountryDisplayName(shopCountryCfg.country)} · {selectedShop.market}
+                    </span>
                   </span>
                 </p>
               </div>
@@ -569,9 +589,13 @@ export const ShopView: React.FC<ShopViewProps> = ({
                         {shop.rating.toFixed(1)}
                       </span>
                       <span className="tabular-nums font-semibold">{shop.sales_count} sales</span>
-                      <span className="inline-flex items-center gap-1 truncate">
-                        <MapPin className="w-3.5 h-3.5 text-orange-500 shrink-0" />
-                        {shop.market}
+                      <span className="inline-flex items-center gap-1.5 truncate font-semibold text-slate-800">
+                        <span className="text-lg leading-none shrink-0" aria-hidden="true">
+                          {resolveShopCountry(shop).flag}
+                        </span>
+                        <span className="truncate">
+                          {getCountryDisplayName(resolveShopCountry(shop).country)} · {shop.market}
+                        </span>
                       </span>
                     </div>
                   </div>

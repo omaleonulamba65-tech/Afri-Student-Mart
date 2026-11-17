@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Check, Globe2, X } from 'lucide-react';
-import { COUNTRY_LANGUAGE_CONFIGS, getCountryConfig } from '../data/languages';
+import {
+  COUNTRY_LANGUAGE_CONFIGS,
+  getCountryConfig,
+  getCountryDisplayName,
+} from '../data/languages';
 import { useI18n } from '../lib/i18nContext';
 import { api } from '../lib/api';
 import type { PublicUser } from '../types';
@@ -115,19 +119,25 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {COUNTRY_LANGUAGE_CONFIGS.map((cfg) => {
                 const active = selectedCountry === cfg.country;
+                const display = getCountryDisplayName(cfg.country);
                 return (
                   <button
                     key={cfg.country}
                     type="button"
                     onClick={() => handleSelectCountry(cfg.country)}
-                    className={`min-h-[44px] rounded-xl border px-3 py-2 text-left transition-colors flex items-center justify-between gap-1.5 ${
+                    className={`min-h-[46px] rounded-xl border px-3 py-2 text-left transition-colors flex items-center justify-between gap-1.5 ${
                       active
                         ? 'border-green-700 bg-green-50 text-green-950 font-extrabold ring-1 ring-green-700'
                         : 'border-slate-200 bg-white text-slate-800 hover:border-green-400 font-semibold'
                     }`}
                   >
-                    <span className="truncate text-xs sm:text-sm">
-                      {cfg.country} <span className="text-[11px] text-slate-500">{cfg.dialCode}</span>
+                    <span className="inline-flex items-center gap-2 min-w-0">
+                      <span className="text-xl sm:text-2xl leading-none shrink-0" aria-hidden="true">
+                        {cfg.flag}
+                      </span>
+                      <span className="truncate text-xs sm:text-sm">
+                        {display} <span className="text-[11px] text-slate-500">{cfg.dialCode}</span>
+                      </span>
                     </span>
                     <span className="text-[11px] font-bold text-green-800 shrink-0">
                       {cfg.currencySymbol.trim()}
@@ -141,8 +151,14 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
           {/* 2. ALL Languages for selected country - NEVER hide small ones */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-extrabold text-slate-900">
-                2. {t('language_label')} — {activeConfig.country} ({activeConfig.languages.length})
+              <label className="text-sm font-extrabold text-slate-900 inline-flex items-center gap-1.5">
+                <span>2. {t('language_label')} —</span>
+                <span className="text-xl leading-none" aria-hidden="true">
+                  {activeConfig.flag}
+                </span>
+                <span>
+                  {getCountryDisplayName(activeConfig.country)} ({activeConfig.languages.length})
+                </span>
               </label>
               <span className="text-xs font-bold text-green-800">{selectedLanguage}</span>
             </div>
@@ -174,11 +190,22 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
 
         {/* Footer Confirm */}
         <div className="border-t border-slate-200 bg-slate-50 p-4 flex items-center justify-between gap-3">
-          <div className="text-xs text-slate-600 min-w-0">
-            <span className="font-bold text-slate-900">
-              {viewAllCountries ? t('all_countries') : activeConfig.country}
+          <div className="text-xs text-slate-600 min-w-0 inline-flex items-center gap-1.5 flex-wrap">
+            <span className="font-bold text-slate-900 inline-flex items-center gap-1.5">
+              {!viewAllCountries && (
+                <span className="text-xl leading-none" aria-hidden="true">
+                  {activeConfig.flag}
+                </span>
+              )}
+              <span>
+                {viewAllCountries
+                  ? `🌍 ${t('all_countries')}`
+                  : getCountryDisplayName(activeConfig.country)}
+              </span>
             </span>{' '}
-            · {selectedLanguage} · {activeConfig.currencySymbol.trim()}
+            <span>
+              · {selectedLanguage} · {activeConfig.currencySymbol.trim()}
+            </span>
           </div>
           <button
             type="button"
