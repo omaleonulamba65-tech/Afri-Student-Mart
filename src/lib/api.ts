@@ -17,6 +17,7 @@ import type {
   WantAlert,
 } from '../types';
 import { getCountryConfig } from '../data/languages';
+import { supabaseClient } from './supabaseClient';
 
 const TOKEN_KEY = 'afri_student_mart_token';
 const ITEMS_CACHE_KEY = 'afri_student_mart_items_cache_v2';
@@ -336,11 +337,69 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
     headers['Authorization'] = `Bearer ${token}`;
   }
   const res = await fetch(url, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  if (!contentType.includes('application/json')) {
+    if (!res.ok) {
+      throw new Error(`Request failed (${res.status})`);
+    }
+    throw new Error('Backend API is not available on static hosting.');
+  }
+  const data = await res.json();
   if (!res.ok) {
     throw new Error(data?.error || `Request failed (${res.status})`);
   }
   return data as T;
+}
+
+function parseSupabasePhotos(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === 'string' && v.length > 0);
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((v): v is string => typeof v === 'string' && v.length > 0);
+      }
+    } catch {
+      return raw.startsWith('http') || raw.startsWith('data:') ? [raw] : [];
+    }
+  }
+  return [];
+}
+
+function mapSupabaseItemRow(row: Record<string, unknown>): MarketplaceItem {
+  const photos = parseSupabasePhotos(row.photos);
+  return {
+    id: String(row.id || ''),
+    title: String(row.title || 'Marketplace Item'),
+    category: String(row.category || 'Others'),
+    price: Number(row.price || 0),
+    condition: (String(row.condition || 'Neatly Used') as MarketplaceItem['condition']),
+    description: String(row.description || ''),
+    photos,
+    thumbnails: photos.slice(0, 1),
+    video_url: '',
+    make_offer: true,
+    pay_on_delivery: true,
+    is_boosted: false,
+    seller_id: String(row.seller_phone || row.id || ''),
+    seller_name: 'Campus Seller',
+    seller_profile_pic: '',
+    seller_institution: String(row.institution || ''),
+    seller_badges: ['student'],
+    seller_rating: 5.0,
+    seller_reviews_count: 0,
+    seller_joined_at: String(row.created_at || new Date().toISOString()),
+    seller_items_count: 1,
+    institution: String(row.institution || ''),
+    location: String(row.location || ''),
+    country: 'Nigeria',
+    country_code: '+234',
+    distance_km: 1,
+    is_featured: false,
+    report_count: 0,
+    status: 'active',
+    created_at: String(row.created_at || new Date().toISOString()),
+  };
 }
 
 export const api = {
@@ -407,7 +466,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  getItems: (params?: {
+  getItems: async (params?: {
     search?: string;
     category?: string;
     condition?: string;
@@ -421,7 +480,12 @@ export const api = {
     page?: number;
     limit?: number;
     lite?: boolean;
-  }) => {
+  }): Promise<{
+    items: MarketplaceItem[];
+    total: number;
+    page: number;
+    has_more: boolean;
+  }> => {
     const qs = new URLSearchParams();
     if (params?.search) qs.set('search', params.search);
     if (params?.category && params.category !== 'All') qs.set('category', params.category);
@@ -437,20 +501,78 @@ export const api = {
     if (params?.limit) qs.set('limit', String(params.limit));
     if (params?.lite) qs.set('lite', '1');
     const q = qs.toString();
-    return apiFetch<{
-      items: MarketplaceItem[];
-      total: number;
-      page: number;
-      has_more: boolean;
-    }>(`/api/items${q ? `?${q}` : ''}`);
+    try {
+      return await apiFetch<{
+        items: MarketplaceItem[];
+        total: number;
+        page: number;
+        has_more: boolean;
+      }>(`/api/items${q ? `?${q}` : ''}`);
+    } catch {
+      const pageNum = Math.max(1, params?.page || 1);
+      const limitNum = Math.max(1, params?.limit || 10);
+      const { data, error } = await supabaseClient
+        .from('items')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error || !Array.isArray(data)) {
+        return { items: [], total: 0, page: pageNum, has_more: false };
+      }
+      let mapped = data.map((r) => mapSupabaseItemRow(r as Record<string, unknown>));
+      if (params?.category && params.category !== 'All') {
+        const c = params.category.toLowerCase();
+        mapped = mapped.filter((it) => it.category.toLowerCase().includes(c));
+      }
+      if (params?.condition && params.condition !== 'All') {
+        mapped = mapped.filter((it) => it.condition === params.condition);
+      }
+      if (params?.institution && params.institution !== 'All') {
+        mapped = mapped.filter((it) => it.institution === params.institution);
+      }
+      if (params?.search) {
+        const s = params.search.toLowerCase();
+        mapped = mapped.filter(
+          (it) =>
+            it.title.toLowerCase().includes(s) ||
+            it.institution.toLowerCase().includes(s) ||
+            it.location.toLowerCase().includes(s) ||
+            it.category.toLowerCase().includes(s)
+        );
+      }
+      if (params?.sort === 'cheapest') {
+        mapped.sort((a, b) => a.price - b.price);
+      }
+      const total = mapped.length;
+      const slice = mapped.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+      return {
+        items: slice,
+        total,
+        page: pageNum,
+        has_more: pageNum * limitNum < total,
+      };
+    }
   },
 
   getItemDetail: async (id: string): Promise<MarketplaceItem> => {
     const cached = itemDetailCache.get(id);
     if (cached && cached.photos.length > 0) return cached;
-    const res = await apiFetch<{ item: MarketplaceItem }>(`/api/items/${id}`);
-    itemDetailCache.set(id, res.item);
-    return res.item;
+    try {
+      const res = await apiFetch<{ item: MarketplaceItem }>(`/api/items/${id}`);
+      itemDetailCache.set(id, res.item);
+      return res.item;
+    } catch {
+      const { data, error } = await supabaseClient
+        .from('items')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (error || !data) {
+        throw new Error('Could not load item details.');
+      }
+      const mapped = mapSupabaseItemRow(data as Record<string, unknown>);
+      itemDetailCache.set(id, mapped);
+      return mapped;
+    }
   },
 
   createItem: (payload: {

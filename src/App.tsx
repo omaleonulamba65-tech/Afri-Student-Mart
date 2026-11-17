@@ -288,16 +288,18 @@ export default function App() {
           myInstitution:
             user?.institution || (selectedInstitution !== 'All' ? selectedInstitution : undefined),
         });
-        setPage(res.page);
-        setTotalItemsCount(res.total);
-        setHasMore(res.has_more);
+        const incomingItems = Array.isArray(res?.items) ? res.items : [];
+        setPage(res?.page || targetPage);
+        setTotalItemsCount(typeof res?.total === 'number' ? res.total : incomingItems.length);
+        setHasMore(Boolean(res?.has_more));
         setItems((prev) => {
+          const safePrev = Array.isArray(prev) ? prev : [];
           const next = append
             ? [
-                ...prev,
-                ...res.items.filter((it) => !prev.some((existing) => existing.id === it.id)),
+                ...safePrev,
+                ...incomingItems.filter((it) => !safePrev.some((existing) => existing.id === it.id)),
               ]
-            : res.items;
+            : incomingItems;
           if (
             !append &&
             !debouncedSearch &&
@@ -338,14 +340,15 @@ export default function App() {
         lite: true,
         country: country === 'All' ? undefined : country,
       })
-      .then((res) => setHotDealItems(res.items))
+      .then((res) => setHotDealItems(Array.isArray(res?.items) ? res.items : []))
       .catch(() => {});
   }, [country]);
 
   const refreshUnread = async () => {
     try {
       const res = await api.getThreads();
-      const total = res.threads.reduce((acc, t) => acc + t.unread_count, 0);
+      const threads = Array.isArray(res?.threads) ? res.threads : [];
+      const total = threads.reduce((acc, t) => acc + (t.unread_count || 0), 0);
       setUnreadCount(total);
     } catch {
       // Ignore
@@ -355,7 +358,7 @@ export default function App() {
   const fetchWishlist = async () => {
     try {
       const res = await api.getWishlist();
-      setWishlistIds(res.item_ids);
+      setWishlistIds(Array.isArray(res?.item_ids) ? res.item_ids : []);
     } catch {
       // Ignore
     }
@@ -369,9 +372,13 @@ export default function App() {
       api
         .getMe()
         .then((res) => {
-          setUser(res.user);
-          refreshUnread();
-          fetchWishlist();
+          if (res?.user) {
+            setUser(res.user);
+            refreshUnread();
+            fetchWishlist();
+          } else {
+            setStoredToken(null);
+          }
         })
         .catch(() => {
           setStoredToken(null);
@@ -380,7 +387,9 @@ export default function App() {
     const adTimer = setTimeout(() => {
       api
         .getAdSettings()
-        .then((res) => setAdSettings(res.settings))
+        .then((res) => {
+          if (res?.settings) setAdSettings(res.settings);
+        })
         .catch(() => {});
     }, 300);
     return () => clearTimeout(adTimer);
