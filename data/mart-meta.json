@@ -1,0 +1,473 @@
+{
+  "user_profiles": {
+    "0559662051": {
+      "country_code": "+233",
+      "badges": [
+        "trader"
+      ],
+      "shop_name": "Smoke Tech Shop",
+      "market": "New Hall Market",
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "0809662052": {
+      "country_code": "+234",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "0809662053": {
+      "country_code": "+234",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "0809662054": {
+      "country_code": "+234",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "08091395217": {
+      "country_code": "+234",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "08092395217": {
+      "country_code": "+234",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "08091409672": {
+      "country_code": "+234",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "08092409672": {
+      "country_code": "+234",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "08091438983": {
+      "country_code": "+234",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "08092438983": {
+      "country_code": "+234",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "08095662994": {
+      "country_code": "+234",
+      "badges": [
+        "trader"
+      ],
+      "shop_name": "Arewa Phones Hub",
+      "market": "Wuse Market",
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "08093639171": {
+      "country_code": "+234",
+      "badges": [
+        "trader"
+      ],
+      "shop_name": "Shop 363917",
+      "market": "Wuse Market",
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": [],
+      "paystack_subaccount_code": "ACCT_asm16a745f8b4",
+      "payout_bank_name": "GTBank (Guaranty Trust Bank)",
+      "payout_account_number": "0123456789",
+      "payout_account_name": "Test Trader 363917"
+    },
+    "08083639172": {
+      "country_code": "+234",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "09988776651": {
+      "country_code": "+233",
+      "country": "Ghana",
+      "language": "Twi / Akan",
+      "badges": [
+        "student"
+      ],
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
+    },
+    "09988776652": {
+      "country_code": "+233",
+      "country": "Ghana",
+      "language": "Twi / Akan",
+      "badges": [
+        "trader"
+      ],
+      "shop_name": "Ama Legon Shop",
+      "market": "Legon Campus Gate",
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": [],
+      "paystack_subaccount_code": "ACCT_asm00b2cec1b5",
+      "payout_bank_name": "Access Bank",
+      "payout_account_number": "0123456789",
+      "payout_account_name": "Ama Test Seller"
+    }
+  },
+  "blocked_users": {
+    "0559662051": {
+      "blocked": true,
+      "block_count": 3
+    }
+  },
+  "item_moderation": {
+    "80f2bb34-90ff-4777-9bb6-1a364f32d861": {
+      "is_featured": false,
+      "is_boosted": false,
+      "make_offer": true,
+      "pay_on_delivery": true,
+      "thumbnails": [
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      ],
+      "video_url": "data:video/webm;base64,GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQI0VSalmQCgq17FAAw9CQE2AQAZ3aGFtbXlXQUAGd2hhbW15RIlACECPQAAAAAAAFlSua0AxrkAu14EBY8WBAZyBACK1nEADdW5khkAFVl9WUDglhohAA1ZQOIOBAeBABrCBCLqBCB9DtnVAIeSRA=",
+      "report_count": 3,
+      "status": "removed"
+    },
+    "45a7bbf5-a2ad-4038-b8ad-d5f4c4f7ca97": {
+      "is_featured": false,
+      "is_boosted": false,
+      "make_offer": true,
+      "pay_on_delivery": true,
+      "thumbnails": [
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+      ],
+      "video_url": "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDE=",
+      "report_count": 0,
+      "status": "active"
+    }
+  },
+  "message_meta": {
+    "06f7c272-e103-42a4-9f57-60db76a89d3b": {
+      "sender_phone": "07089628626",
+      "read_by_recipient": false
+    },
+    "6a4ff997-0655-484e-a641-e500f31b0872": {
+      "sender_phone": "0559662051",
+      "read_by_recipient": false
+    },
+    "f35417d1-1a37-4098-96fb-89371a6152fe": {
+      "sender_phone": "0809662052",
+      "read_by_recipient": false
+    },
+    "60814612-edfd-4189-af3d-df72dcd0b7f5": {
+      "sender_phone": "08092409672",
+      "read_by_recipient": false
+    },
+    "3c5aaf9e-47b4-4935-96cb-c173f2b0a018": {
+      "sender_phone": "09988776651",
+      "read_by_recipient": false
+    }
+  },
+  "service_messages": [],
+  "wishlists": {},
+  "offers": [
+    {
+      "id": "bb05ebae-0b5a-4255-a8ec-5865ac346e8d",
+      "item_id": "80f2bb34-90ff-4777-9bb6-1a364f32d861",
+      "item_title": "Clean iPhone 11 128GB",
+      "item_price": 140000,
+      "buyer_id": "600a19f7-6bef-4722-8743-b5f8905f45a4",
+      "buyer_phone": "0809662052",
+      "buyer_name": "Smoke Buyer",
+      "seller_id": "c31d956c-4824-41e7-b5d6-c45ddbff5e89",
+      "seller_phone": "0559662051",
+      "seller_name": "Smoke Trader",
+      "offered_price": 125000,
+      "status": "accepted",
+      "created_at": "2026-11-16T22:09:28.440Z",
+      "counter_price": 135000
+    },
+    {
+      "id": "f14cb04a-4671-4000-ab1d-1f013f75814c",
+      "item_id": "b832cd48-b39e-4466-910e-f9fa4ccde9b6",
+      "buyer_phone": "07089628626",
+      "buyer_name": "JOKEY PERKY GROUP (Owner)",
+      "seller_phone": "07089628626",
+      "offered_price": 5000,
+      "status": "pending",
+      "created_at": "2026-11-16T22:01:23.299Z"
+    }
+  ],
+  "ratings": [
+    {
+      "id": "47206884-da57-49a9-acff-82f5c21cc110",
+      "target_type": "seller",
+      "target_id": "c31d956c-4824-41e7-b5d6-c45ddbff5e89",
+      "item_id": "80f2bb34-90ff-4777-9bb6-1a364f32d861",
+      "rater_phone": "0809662052",
+      "rater_name": "Smoke Buyer",
+      "score": 5,
+      "comment": "Fast meetup and clean phone!",
+      "video_url": "data:video/webm;base64,GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQI0VSalmQCgq17FAAw9CQE2AQAZ3aGFtbXlXQUAGd2hhbW15RIlACECPQAAAAAAAFlSua0AxrkAu14EBY8WBAZyBACK1nEADdW5khkAFVl9WUDglhohAA1ZQOIOBAeBABrCBCLqBCB9DtnVAIeSRA=",
+      "created_at": "2026-11-16T22:09:29.224Z"
+    },
+    {
+      "id": "45d22ac7-41a1-4136-9a4a-bd7c8a1aa69e",
+      "target_type": "seller",
+      "target_id": "b4595f88-2571-428d-85f5-5258d2078a18",
+      "rater_phone": "07089628626",
+      "rater_name": "JOKEY PERKY GROUP (Owner)",
+      "score": 5,
+      "comment": "Fast",
+      "created_at": "2026-11-16T22:01:23.505Z"
+    }
+  ],
+  "want_alerts": [],
+  "services": [],
+  "bookings": [],
+  "orders": [
+    {
+      "id": "79ed4a35-baed-4e92-b0fc-5726b2c5b349",
+      "reference": "TEST-SPLIT7-1794907699737",
+      "item_id": "5360c2ec-425c-4b1d-b1cc-0e11e1cdd11c",
+      "item_title": "Split 7 Percent Test Item",
+      "item_photo": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP///w==",
+      "item_location": "Abuja",
+      "buyer_id": "783141fb-9b8e-4b56-aa3c-d1ce22a7c5f9",
+      "buyer_name": "Split Test Buyer",
+      "buyer_phone": "09977665541",
+      "buyer_email": "student.09977665541@afristudentmart.ng",
+      "seller_id": "b9f7fb3b-a8ed-44e7-8d1b-b6b428b1f0ad",
+      "seller_name": "Split Test Seller",
+      "seller_phone": "09977665542",
+      "product_price": 1000,
+      "delivery_fee": 500,
+      "total_amount": 1500,
+      "admin_commission": 70,
+      "admin_total_kept": 570,
+      "seller_payout": 930,
+      "country": "Nigeria",
+      "currency_symbol": "₦",
+      "paystack_split_code": "",
+      "seller_subaccount_code": "ACCT_asm303b4fc460",
+      "fee_bearer": "all-proportional",
+      "delivery_address": "Wuse Zone 5",
+      "order_status": "paid_escrow",
+      "created_at": "2026-11-17T09:28:20.019Z"
+    },
+    {
+      "id": "1418ad77-64ee-41f6-ba82-26e6e02bb929",
+      "reference": "TEST-REF-1794907144979",
+      "item_id": "3fc4a1ae-83ab-4cd0-adf0-4d790315e487",
+      "item_title": "Verification Textbook E2E",
+      "item_photo": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP///w==",
+      "item_location": "Legon",
+      "buyer_id": "a37ffb89-6e0e-455c-beea-630c10eee44b",
+      "buyer_name": "Kofi Test Buyer",
+      "buyer_phone": "09988776651",
+      "buyer_email": "student.09988776651@afristudentmart.ng",
+      "seller_id": "7a9ac42f-4a63-4d0c-bc86-525d46e85d34",
+      "seller_name": "Ama Test Seller",
+      "seller_phone": "09988776652",
+      "product_price": 1000,
+      "delivery_fee": 20,
+      "total_amount": 1020,
+      "admin_commission": 100,
+      "admin_total_kept": 120,
+      "seller_payout": 900,
+      "country": "Ghana",
+      "currency_symbol": "GH₵",
+      "paystack_split_code": "",
+      "seller_subaccount_code": "ACCT_asm00b2cec1b5",
+      "fee_bearer": "all-proportional",
+      "delivery_address": "Legon Hall Room 12",
+      "order_status": "paid_escrow",
+      "created_at": "2026-11-17T09:19:05.312Z"
+    },
+    {
+      "id": "0e54b785-eb12-4b89-a05c-4e078c13c679",
+      "reference": "ASM_TEST_363917",
+      "item_id": "f89fe99f-9154-4ae1-b794-099b2b96fed5",
+      "item_title": "Test Phone 363917",
+      "item_photo": "data:image/jpeg;base64,/9j/4AAQSkZJRg==",
+      "item_location": "Wuse Market",
+      "buyer_id": "ac6dc8ad-eca0-465e-8919-870927b35387",
+      "buyer_name": "Test Buyer 363917",
+      "buyer_phone": "08083639172",
+      "buyer_email": "buyer@afristudentmart.ng",
+      "seller_id": "242bf62a-99d7-495c-b2b5-e5cbc9360615",
+      "seller_name": "Test Trader 363917",
+      "seller_phone": "08093639171",
+      "product_price": 10000,
+      "delivery_fee": 1000,
+      "total_amount": 11000,
+      "admin_commission": 1100,
+      "admin_total_kept": 1100,
+      "seller_payout": 9900,
+      "paystack_split_code": "",
+      "seller_subaccount_code": "ACCT_asm16a745f8b4",
+      "fee_bearer": "all-proportional",
+      "delivery_address": "UNIABUJA Main Gate",
+      "order_status": "paid_escrow",
+      "created_at": "2026-11-16T22:49:25.368Z"
+    }
+  ],
+  "promotion_fees": [
+    {
+      "id": "00431f4c-8031-48be-a3e0-f4f11fd9ef8a",
+      "fee_type": "boost_item",
+      "target_id": "f89fe99f-9154-4ae1-b794-099b2b96fed5",
+      "seller_phone": "08093639171",
+      "amount": 500,
+      "reference": "ASM_PROMO_363917",
+      "created_at": "2026-11-16T22:49:25.566Z"
+    }
+  ],
+  "reports": [
+    {
+      "id": "0df984ac-de98-4a29-b4b0-f1b4b671eac9",
+      "target_type": "user",
+      "target_id": "09988776651",
+      "reporter_phone": "SYSTEM_CHAT_FILTER",
+      "reason": "Account Number Blocked: Pay UBA account 0123456789",
+      "resolved": false,
+      "created_at": "2026-11-17T09:19:05.849Z"
+    },
+    {
+      "id": "f7c61d9b-1f1b-47a9-abe1-df079d212e43",
+      "target_type": "user",
+      "target_id": "09988776651",
+      "reporter_phone": "SYSTEM_CHAT_FILTER",
+      "reason": "Account Number Blocked: My Zenith acct 0123456789",
+      "resolved": false,
+      "created_at": "2026-11-17T09:19:05.797Z"
+    },
+    {
+      "id": "60d0e12c-0516-463d-8865-4e55b5fe287f",
+      "target_type": "user",
+      "target_id": "09988776651",
+      "reporter_phone": "SYSTEM_CHAT_FILTER",
+      "reason": "Account Number Blocked: Send to GTBank 0123456789",
+      "resolved": false,
+      "created_at": "2026-11-17T09:19:05.748Z"
+    },
+    {
+      "id": "c586131d-8f18-4604-8587-c2d4b463c915",
+      "target_type": "item",
+      "target_id": "80f2bb34-90ff-4777-9bb6-1a364f32d861",
+      "reporter_phone": "0809662054",
+      "reason": "test3",
+      "resolved": false,
+      "created_at": "2026-11-16T22:09:29.953Z"
+    },
+    {
+      "id": "cd266e46-b4e6-4019-b3f7-d1ae396f7b87",
+      "target_type": "item",
+      "target_id": "80f2bb34-90ff-4777-9bb6-1a364f32d861",
+      "reporter_phone": "0809662053",
+      "reason": "test2",
+      "resolved": false,
+      "created_at": "2026-11-16T22:09:29.816Z"
+    },
+    {
+      "id": "3e4be50c-641d-4a39-a6c3-82442f2d8807",
+      "target_type": "item",
+      "target_id": "80f2bb34-90ff-4777-9bb6-1a364f32d861",
+      "reporter_phone": "0809662052",
+      "reason": "test1",
+      "resolved": false,
+      "created_at": "2026-11-16T22:09:29.694Z"
+    }
+  ],
+  "chat_moderation": {
+    "09988776651": {
+      "attempts": 0,
+      "blocked_until": 1794910745849
+    }
+  },
+  "ad_settings": {
+    "ads_enabled": false,
+    "interstitial_enabled": false,
+    "publisher_id": "",
+    "banner_unit_id": "",
+    "feed_unit_id": "",
+    "interstitial_unit_id": "",
+    "sidebar_unit_id": "",
+    "google_ads_earnings": 0,
+    "paystack_public_key": "",
+    "paystack_split_code": "",
+    "admin_subaccount_code": ""
+  }
+}
