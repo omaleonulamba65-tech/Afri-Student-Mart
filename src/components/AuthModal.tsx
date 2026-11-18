@@ -87,7 +87,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [accountType, setAccountType] = useState<AccountBadge | ''>('');
 
   // Shared / Login
+  const [loginIdentifier, setLoginIdentifier] = useState('');
   const [loginName, setLoginName] = useState('');
+  const [email, setEmail] = useState('');
   const [countryCode, setCountryCode] = useState(initialCfg.dialCode || '+234');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -133,11 +135,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [compressingImage, setCompressingImage] = useState(false);
   const [error, setError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
 
   useEffect(() => {
     if (open) {
       setMode(initialMode);
       setError('');
+      setInfoMessage('');
       const targetCountry = country === 'All' ? 'Nigeria' : country;
       const cfg = getCountryConfig(targetCountry);
       setSignupCountry(cfg.country);
@@ -269,10 +273,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setInfoMessage('');
+    const identifier = loginIdentifier.trim();
+    if (!identifier || !password) {
+      setError('Enter your Email Address (or Phone Number) and Password.');
+      return;
+    }
     setLoading(true);
     try {
       const res = await api.login({
-        phone_number: phone,
+        email: identifier.includes('@') ? identifier : undefined,
+        phone_number: identifier,
         password,
         full_name: loginName.trim() || undefined,
       });
@@ -286,6 +297,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const handleNextStep = () => {
     setError('');
+    setInfoMessage('');
     if (step === 1) {
       if (!signupCountry || !signupLanguage) {
         setError('Please pick your Country and Language first.');
@@ -294,8 +306,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setCountryAndLanguage(signupCountry, signupLanguage, true);
       setStep(2);
     } else if (step === 2) {
-      if (!fullName.trim() || !phone.trim() || password.length < 4) {
-        setError('Enter your Full Name, Phone Number, and a Password (min 4 characters).');
+      if (!fullName.trim() || !email.trim() || !email.includes('@') || !phone.trim() || password.length < 6) {
+        setError('Enter Full Name, valid Email Address, Phone Number, and Password (min 6 characters).');
         return;
       }
       setStep(3);
@@ -357,6 +369,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setInfoMessage('');
     if (!accountType) {
       setError('Choose your account type.');
       return;
@@ -369,6 +382,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const res = await api.signup({
         full_name: fullName.trim(),
+        email: email.trim().toLowerCase(),
         phone_number: phone.trim(),
         country_code: countryCode,
         country: signupCountry,
@@ -400,7 +414,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         secondary_reg_number: secondaryRegNumber.trim() || undefined,
       });
       setCountryAndLanguage(signupCountry, signupLanguage, true);
-      onSuccess(res.token, res.user, true);
+      if (res.needsEmailConfirmation || !res.token) {
+        setLoginIdentifier(email.trim().toLowerCase());
+        setMode('login');
+        setInfoMessage(
+          `Account created for ${email.trim().toLowerCase()}! Check your inbox to confirm your email, then sign in below.`
+        );
+      } else {
+        onSuccess(res.token, res.user, true);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Signup failed.');
     } finally {
@@ -466,39 +488,46 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {error}
             </div>
           )}
+          {infoMessage && (
+            <div className="mb-4 rounded-xl bg-green-50 border border-green-300 px-4 py-3 text-sm font-semibold text-green-900">
+              {infoMessage}
+            </div>
+          )}
 
           {mode === 'login' ? (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">{t('welcome_back')}</h2>
                 <p className="text-sm text-slate-600 mt-0.5">
-                  Sign in with your phone number and password. No email needed.
+                  Sign in with your Supabase Email Address and Password.
                 </p>
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                  {t('phone_number_label')}
+                  Email Address (or Phone Number)
                 </label>
                 <div className="flex gap-2">
-                  <select
-                    value={countryCode}
-                    onChange={(e) => setCountryCode(e.target.value)}
-                    aria-label="Country code"
-                    className="w-32 min-h-[48px] rounded-xl border border-slate-300 bg-white px-2 text-base font-semibold text-slate-800 focus:border-green-700 focus:outline-none shrink-0"
-                  >
-                    {WEST_AND_SOUTH_AFRICA_COUNTRIES.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.flag} {c.code}
-                      </option>
-                    ))}
-                  </select>
+                  {!loginIdentifier.includes('@') && (
+                    <select
+                      value={countryCode}
+                      onChange={(e) => setCountryCode(e.target.value)}
+                      aria-label="Country code"
+                      className="w-28 min-h-[48px] rounded-xl border border-slate-300 bg-white px-2 text-sm font-semibold text-slate-800 focus:border-green-700 focus:outline-none shrink-0"
+                    >
+                      {WEST_AND_SOUTH_AFRICA_COUNTRIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.flag} {c.code}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <input
-                    type="tel"
+                    type="text"
                     required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="e.g. 08012345678"
+                    value={loginIdentifier}
+                    onChange={(e) => setLoginIdentifier(e.target.value)}
+                    placeholder="you@example.com"
                     className="flex-1 min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none focus:ring-2 focus:ring-green-700/20"
                   />
                 </div>
@@ -681,6 +710,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                   <div>
                     <label className="block text-sm font-semibold text-slate-800 mb-1.5">
+                      Email Address (Required for Supabase Auth Login)
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-1.5">
                       {t('phone_number_label')} (West &amp; South Africa)
                     </label>
                     <div className="flex gap-2">
@@ -717,7 +760,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         required
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Create password (min 4 chars)"
+                        placeholder="Create password (min 6 chars)"
                         className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 pr-12 text-base focus:border-green-700 focus:outline-none"
                       />
                       <button

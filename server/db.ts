@@ -761,6 +761,53 @@ export async function getUserById(id: string): Promise<DbUser | null> {
   return (data as DbUser) || null;
 }
 
+export async function getOrSyncUserFromSupabaseJwt(jwt: string): Promise<DbUser | null> {
+  if (!jwt || jwt.split('.').length !== 3) return null;
+  try {
+    const sb = getSupabase();
+    const { data, error } = await sb.auth.getUser(jwt);
+    if (error || !data?.user) return null;
+    const authUser = data.user;
+    const meta = (authUser.user_metadata || {}) as Record<string, unknown>;
+
+    const byId = await getUserById(authUser.id);
+    if (byId) return byId;
+
+    const rawPhone = typeof meta.phone_number === 'string' && meta.phone_number.trim()
+      ? normalizePhone(meta.phone_number)
+      : `auth_${authUser.id.slice(0, 12)}`;
+    const byPhone = await getUserByPhone(rawPhone).catch(() => null);
+    if (byPhone) return byPhone;
+
+    const fullName = String(meta.full_name || authUser.email?.split('@')[0] || 'Mart Member').trim();
+    const role: UserRole = isAuthorizedOwnerName(fullName)
+      ? 'owner'
+      : meta.account_type === 'trader' || meta.account_type === 'service_provider' || meta.role === 'seller'
+      ? 'seller'
+      : 'buyer';
+
+    const { data: inserted } = await sb
+      .from('users')
+      .insert({
+        id: authUser.id,
+        full_name: fullName,
+        phone_number: rawPhone,
+        password: '[supabase_auth]',
+        role,
+        institution: String(meta.institution || 'Main Campus'),
+        state: String(meta.state || ''),
+        campus: String(meta.campus || 'Main Campus'),
+        profile_pic: String(meta.profile_pic || ''),
+      })
+      .select('*')
+      .maybeSingle();
+
+    return (inserted as DbUser) || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function createUser(input: {
   full_name: string;
   phone_number: string;

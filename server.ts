@@ -25,6 +25,7 @@ import {
   featureMyShop,
   getAdSettings,
   getItemById,
+  getOrSyncUserFromSupabaseJwt,
   getOwnerDashboardData,
   getSupabaseHealth,
   getThreadMessages,
@@ -90,13 +91,11 @@ async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction
   const queryToken = typeof req.query.token === 'string' ? req.query.token : '';
   const rawToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : queryToken;
   const phone = verifySessionToken(rawToken);
-  if (!phone) {
-    res.status(401).json({ error: 'Please sign in to continue.' });
-    return;
-  }
-  const user = await getUserByPhone(phone);
+  const user = phone
+    ? await getUserByPhone(phone)
+    : await getOrSyncUserFromSupabaseJwt(rawToken);
   if (!user) {
-    res.status(401).json({ error: 'Session expired. Please sign in again.' });
+    res.status(401).json({ error: 'Please sign in to continue.' });
     return;
   }
   if (isUserBlocked(user.phone_number)) {

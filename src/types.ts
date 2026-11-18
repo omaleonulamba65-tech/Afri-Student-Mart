@@ -65,6 +65,7 @@ export type ItemCategory = (typeof ITEM_CATEGORIES)[number];
 export interface PublicUser {
   id: string;
   full_name: string;
+  email?: string;
   phone_number?: string; // Private: only returned to self or Owner
   country_code?: string;
   country?: string;

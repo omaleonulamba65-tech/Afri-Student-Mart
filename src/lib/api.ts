@@ -18,7 +18,7 @@ import type {
 } from '../types';
 import { inferCountryFromLocationText } from '../data/countryDocuments';
 import { getCountryConfig } from '../data/languages';
-import { supabaseClient } from './supabaseClient';
+import { supabase, supabaseClient } from './supabaseClient';
 
 const TOKEN_KEY = 'afri_student_mart_token';
 const ITEMS_CACHE_KEY = 'afri_student_mart_items_cache_v3';
@@ -417,9 +417,190 @@ function mapSupabaseItemRow(row: Record<string, unknown>): MarketplaceItem {
   };
 }
 
+const PHONE_EMAIL_MAP_KEY = 'afri_mart_phone_email_map_v1';
+
+function normalizePhoneDigits(countryCode: string | undefined, rawPhone: string): string {
+  const clean = (rawPhone || '').trim();
+  if (!clean) return '';
+  const digits = clean.replace(/\D/g, '');
+  if (!digits) return '';
+  const ccDigits = (countryCode || '+234').replace(/\D/g, '') || '234';
+  if (digits.startsWith(ccDigits) && digits.length >= ccDigits.length + 7) {
+    return digits;
+  }
+  if (digits.startsWith('0')) {
+    return `${ccDigits}${digits.slice(1)}`;
+  }
+  if (digits.length <= 10) {
+    return `${ccDigits}${digits}`;
+  }
+  return digits;
+}
+
+function savePhoneEmailMapping(phone: string, email: string) {
+  try {
+    if (!phone || !email) return;
+    const raw = localStorage.getItem(PHONE_EMAIL_MAP_KEY);
+    const map = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    map[phone] = email.trim().toLowerCase();
+    const digitsOnly = phone.replace(/\D/g, '');
+    if (digitsOnly) map[digitsOnly] = email.trim().toLowerCase();
+    localStorage.setItem(PHONE_EMAIL_MAP_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function resolveLoginEmail(identifier: string): string {
+  const trimmed = (identifier || '').trim();
+  if (trimmed.includes('@')) {
+    return trimmed.toLowerCase();
+  }
+  const digits = trimmed.replace(/\D/g, '');
+  try {
+    const raw = localStorage.getItem(PHONE_EMAIL_MAP_KEY);
+    if (raw) {
+      const map = JSON.parse(raw) as Record<string, string>;
+      if (map[trimmed]) return map[trimmed];
+      if (digits && map[digits]) return map[digits];
+    }
+  } catch {
+    // Ignore
+  }
+  return `phone_${digits || 'user'}@afristudentmart.com`;
+}
+
+function mapSupabaseAuthUserToPublicUser(
+  authUser: { id: string; email?: string | null; user_metadata?: Record<string, unknown>; created_at?: string },
+  dbRow?: Record<string, unknown> | null
+): PublicUser {
+  const meta = (authUser.user_metadata || {}) as Record<string, unknown>;
+  const country = String(meta.country || 'Nigeria');
+  const cfg = getCountryConfig(country);
+  const fullName = String(
+    dbRow?.full_name || meta.full_name || authUser.email?.split('@')[0] || 'Mart Member'
+  );
+  const normalizedName = fullName.trim().toLowerCase().replace(/\s+/g, ' ');
+  const isOwner =
+    normalizedName === 'jokey perky group' ||
+    normalizedName === 'jokeyperky group' ||
+    normalizedName === 'jokipeki group' ||
+    meta.role === 'owner' ||
+    dbRow?.role === 'owner';
+  const accountType: AccountBadge =
+    meta.account_type === 'trader' || meta.account_type === 'service_provider'
+      ? meta.account_type
+      : 'student';
+  const rawBadges = Array.isArray(meta.badges)
+    ? (meta.badges as AccountBadge[])
+    : [accountType];
+  const derivedRole: PublicUser['role'] = isOwner
+    ? 'owner'
+    : dbRow?.role === 'seller' ||
+      meta.role === 'seller' ||
+      accountType === 'trader' ||
+      accountType === 'service_provider'
+    ? 'seller'
+    : 'buyer';
+
+  return {
+    id: String(dbRow?.id || authUser.id),
+    full_name: fullName,
+    email: authUser.email || (typeof meta.email === 'string' ? meta.email : undefined),
+    phone_number: String(dbRow?.phone_number || meta.phone_number || ''),
+    country_code: String(meta.country_code || cfg.dialCode),
+    country,
+    language: String(meta.language || cfg.languages[0] || 'English'),
+    role: derivedRole,
+    badges: rawBadges,
+    institution: String(dbRow?.institution || meta.institution || ''),
+    level: typeof meta.level === 'string' ? meta.level : undefined,
+    school_id_photo: typeof meta.school_id_photo === 'string' ? meta.school_id_photo : undefined,
+    id_doc_type: typeof meta.id_doc_type === 'string' ? meta.id_doc_type : undefined,
+    id_doc_number: typeof meta.id_doc_number === 'string' ? meta.id_doc_number : undefined,
+    business_reg_type: typeof meta.business_reg_type === 'string' ? meta.business_reg_type : undefined,
+    business_reg_number:
+      typeof meta.business_reg_number === 'string' ? meta.business_reg_number : undefined,
+    secondary_reg_number:
+      typeof meta.secondary_reg_number === 'string' ? meta.secondary_reg_number : undefined,
+    shop_name: typeof meta.shop_name === 'string' ? meta.shop_name : undefined,
+    market: typeof meta.market === 'string' ? meta.market : undefined,
+    shop_doc_photo: typeof meta.shop_doc_photo === 'string' ? meta.shop_doc_photo : undefined,
+    service_category: typeof meta.service_category === 'string' ? meta.service_category : undefined,
+    price_from: typeof meta.price_from === 'number' ? meta.price_from : undefined,
+    work_photos: Array.isArray(meta.work_photos) ? (meta.work_photos as string[]) : undefined,
+    state: String(dbRow?.state || meta.state || ''),
+    campus: String(dbRow?.campus || meta.campus || ''),
+    profile_pic: String(dbRow?.profile_pic || meta.profile_pic || ''),
+    trust_score: 5,
+    reviews_count: 0,
+    blocked: Boolean(dbRow?.blocked),
+    block_count: Number(dbRow?.block_count || 0),
+    paystack_subaccount_code:
+      typeof meta.paystack_subaccount_code === 'string' ? meta.paystack_subaccount_code : undefined,
+    payout_bank_name: typeof meta.payout_bank_name === 'string' ? meta.payout_bank_name : undefined,
+    payout_account_name:
+      typeof meta.payout_account_name === 'string' ? meta.payout_account_name : undefined,
+    payout_account_last4:
+      typeof meta.payout_account_number === 'string' && meta.payout_account_number.length >= 4
+        ? meta.payout_account_number.slice(-4)
+        : undefined,
+    created_at: String(dbRow?.created_at || authUser.created_at || new Date().toISOString()),
+  };
+}
+
+async function syncPublicUserProfile(
+  authUser: { id: string; email?: string | null; user_metadata?: Record<string, unknown> }
+): Promise<Record<string, unknown> | null> {
+  const meta = (authUser.user_metadata || {}) as Record<string, unknown>;
+  const phone = String(meta.phone_number || '').trim();
+  try {
+    const { data: existingById } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', authUser.id)
+      .maybeSingle();
+    if (existingById) return existingById as Record<string, unknown>;
+
+    if (phone) {
+      const { data: existingByPhone } = await supabase
+        .from('users')
+        .select('*')
+        .eq('phone_number', phone)
+        .maybeSingle();
+      if (existingByPhone) return existingByPhone as Record<string, unknown>;
+    }
+
+    const derivedRole =
+      meta.account_type === 'trader' || meta.account_type === 'service_provider' || meta.role === 'seller'
+        ? 'seller'
+        : 'buyer';
+    const safePhone = phone || `auth_${authUser.id.slice(0, 12)}`;
+    const { data: inserted } = await supabase
+      .from('users')
+      .insert({
+        id: authUser.id,
+        full_name: String(meta.full_name || authUser.email?.split('@')[0] || 'Mart Member'),
+        phone_number: safePhone,
+        password: '[supabase_auth]',
+        role: derivedRole,
+        institution: String(meta.institution || 'Main Campus'),
+        state: String(meta.state || ''),
+        campus: String(meta.campus || 'Main Campus'),
+        profile_pic: String(meta.profile_pic || ''),
+      })
+      .select('*')
+      .maybeSingle();
+    return (inserted as Record<string, unknown> | null) || null;
+  } catch {
+    return null;
+  }
+}
+
 export const api = {
-  signup: (payload: {
+  signup: async (payload: {
     full_name: string;
+    email?: string;
     phone_number: string;
     country_code: string;
     password: string;
@@ -448,11 +629,68 @@ export const api = {
     business_reg_type?: string;
     business_reg_number?: string;
     secondary_reg_number?: string;
-  }) =>
-    apiFetch<{ token: string; user: PublicUser }>('/api/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
+  }): Promise<{ token: string; user: PublicUser; needsEmailConfirmation?: boolean }> => {
+    const normalizedPhone = normalizePhoneDigits(payload.country_code, payload.phone_number);
+    const email = (payload.email || '').trim().toLowerCase() || `phone_${normalizedPhone}@afristudentmart.com`;
+    const derivedRole: 'buyer' | 'seller' =
+      payload.account_type === 'trader' || payload.account_type === 'service_provider'
+        ? 'seller'
+        : payload.role;
+
+    const userMeta = {
+      full_name: payload.full_name.trim(),
+      email,
+      phone_number: normalizedPhone || payload.phone_number.trim(),
+      country_code: payload.country_code,
+      country: payload.country || 'Nigeria',
+      language: payload.language || 'English',
+      account_type: payload.account_type,
+      role: derivedRole,
+      badges: [payload.account_type],
+      institution: payload.institution,
+      level: payload.level,
+      id_doc_type: payload.id_doc_type,
+      id_doc_number: payload.id_doc_number,
+      business_reg_type: payload.business_reg_type,
+      business_reg_number: payload.business_reg_number,
+      secondary_reg_number: payload.secondary_reg_number,
+      shop_name: payload.shop_name,
+      market: payload.market,
+      service_category: payload.service_category,
+      price_from: payload.price_from,
+      state: payload.state,
+      campus: payload.campus,
+      payout_bank_name: payload.payout_bank_name,
+      payout_account_number: payload.payout_account_number,
+      payout_account_name: payload.payout_account_name,
+      agreed_policies: payload.agreed_policies,
+    };
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password: payload.password,
+      options: {
+        data: userMeta,
+      },
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (!data.user) {
+      throw new Error('Could not create user account in Supabase.');
+    }
+
+    savePhoneEmailMapping(normalizedPhone || payload.phone_number.trim(), email);
+    const dbRow = await syncPublicUserProfile(data.user);
+    const publicUser = mapSupabaseAuthUserToPublicUser(data.user, dbRow);
+
+    return {
+      token: data.session?.access_token || '',
+      user: publicUser,
+      needsEmailConfirmation: !data.session,
+    };
+  },
 
   saveSellerSubaccount: (payload: {
     bank_name: string;
@@ -472,19 +710,88 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  login: (payload: { phone_number: string; password: string; full_name?: string }) =>
-    apiFetch<{ token: string; user: PublicUser }>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
+  login: async (payload: {
+    phone_number: string;
+    email?: string;
+    password: string;
+    full_name?: string;
+  }): Promise<{ token: string; user: PublicUser }> => {
+    const identifier = (payload.email || payload.phone_number || '').trim();
+    const email = resolveLoginEmail(identifier);
 
-  getMe: () => apiFetch<{ user: PublicUser }>('/api/auth/me'),
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password: payload.password,
+    });
 
-  updateProfile: (payload: Partial<PublicUser> & { password?: string }) =>
-    apiFetch<{ user: PublicUser }>('/api/auth/profile', {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    }),
+    if (error) {
+      if (error.message.toLowerCase().includes('invalid login credentials') && !identifier.includes('@')) {
+        throw new Error('Invalid credentials. Enter the Email Address and Password you registered with.');
+      }
+      throw new Error(error.message);
+    }
+    if (!data.user || !data.session) {
+      throw new Error('Login succeeded but no active Supabase session was returned.');
+    }
+
+    if (identifier && !identifier.includes('@')) {
+      savePhoneEmailMapping(identifier, email);
+    }
+    const dbRow = await syncPublicUserProfile(data.user);
+    const publicUser = mapSupabaseAuthUserToPublicUser(data.user, dbRow);
+
+    return {
+      token: data.session.access_token,
+      user: publicUser,
+    };
+  },
+
+  logout: async () => {
+    setStoredToken(null);
+    await supabase.auth.signOut().catch(() => {});
+  },
+
+  getMe: async (): Promise<{ user: PublicUser }> => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData?.session;
+    if (!session?.user) {
+      throw new Error('No active session.');
+    }
+    setStoredToken(session.access_token);
+    const dbRow = await syncPublicUserProfile(session.user);
+    return { user: mapSupabaseAuthUserToPublicUser(session.user, dbRow) };
+  },
+
+  updateProfile: async (payload: Partial<PublicUser> & { password?: string }): Promise<{ user: PublicUser }> => {
+    const { password, ...metaUpdates } = payload;
+    const { data, error } = await supabase.auth.updateUser({
+      ...(password ? { password } : {}),
+      data: metaUpdates,
+    });
+    if (error) {
+      throw new Error(error.message);
+    }
+    const authUser = data.user;
+    if (!authUser) {
+      throw new Error('Could not update profile.');
+    }
+    try {
+      await supabase
+        .from('users')
+        .update({
+          ...(payload.full_name ? { full_name: payload.full_name } : {}),
+          ...(payload.institution ? { institution: payload.institution } : {}),
+          ...(payload.state ? { state: payload.state } : {}),
+          ...(payload.campus ? { campus: payload.campus } : {}),
+          ...(payload.profile_pic !== undefined ? { profile_pic: payload.profile_pic } : {}),
+        })
+        .eq('id', authUser.id);
+    } catch {
+      // Ignore secondary profile table errors
+    }
+    const dbRow = await syncPublicUserProfile(authUser);
+    return { user: mapSupabaseAuthUserToPublicUser(authUser, dbRow) };
+  },
 
   getItems: async (params?: {
     search?: string;

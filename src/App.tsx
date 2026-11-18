@@ -444,33 +444,30 @@ export default function App() {
     }
   };
 
-  // Boot: restore session, fetch wishlist, load Top 10 Cheap Hot Deals & defer ad settings
+  // Boot: restore Supabase Auth session, fetch wishlist, load Top 10 Cheap Hot Deals & defer ad settings
   useEffect(() => {
     fetchHotDeals();
-    const token = getStoredToken();
-    if (token) {
-      api
-        .getMe()
-        .then((res) => {
-          if (res?.user) {
-            setUser(res.user);
-            try {
-              if (res.user.role === 'owner' && localStorage.getItem(OWNER_VIEW_KEY) === '1') {
-                setShowOwnerDashboard(true);
-              }
-            } catch {
-              // Ignore
+    api
+      .getMe()
+      .then((res) => {
+        if (res?.user) {
+          setUser(res.user);
+          try {
+            if (res.user.role === 'owner' && localStorage.getItem(OWNER_VIEW_KEY) === '1') {
+              setShowOwnerDashboard(true);
             }
-            refreshUnread();
-            fetchWishlist();
-          } else {
-            setStoredToken(null);
+          } catch {
+            // Ignore
           }
-        })
-        .catch(() => {
+          refreshUnread();
+          fetchWishlist();
+        } else {
           setStoredToken(null);
-        });
-    }
+        }
+      })
+      .catch(() => {
+        setStoredToken(null);
+      });
     const adTimer = setTimeout(() => {
       api
         .getAdSettings()
@@ -821,7 +818,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    setStoredToken(null);
+    void api.logout();
     setUser(null);
     setShowOwnerDashboard(false);
     setCartCheckoutActive(false);
