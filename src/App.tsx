@@ -39,14 +39,12 @@ import {
 import { getMarketsByCountry } from './data/markets';
 import {
   api,
-  getCachedItems,
   getLowDataMode,
-  getStoredToken,
-  setCachedItems,
   setLowDataMode as persistLowDataMode,
   setStoredToken,
 } from './lib/api';
 import { useI18n } from './lib/i18nContext';
+import { supabase } from './lib/supabaseClient';
 import {
   AdSettings,
   CartItem,
@@ -59,7 +57,6 @@ import {
   PublicUser,
   ServiceProvider,
   TraderShop,
-  WantAlertMatch,
 } from './types';
 
 // Code-split secondary views & modals so Home loads in <2 seconds even on 3G Android phones
@@ -162,10 +159,6 @@ const TabFallback = () => (
   <div className="py-12 text-center text-sm font-semibold text-slate-500">Loading...</div>
 );
 
-const OWNER_VIEW_KEY = 'afri_mart_owner_view';
-const CART_KEY = 'afri_mart_cart_v1';
-const SELECTED_STATE_KEY = 'afri_mart_selected_state';
-
 export default function App() {
   const {
     country,
@@ -179,20 +172,19 @@ export default function App() {
     formatMoney,
   } = useI18n();
 
-  const initialCache = useMemo(() => getCachedItems(country), []);
   const [user, setUser] = useState<PublicUser | null>(null);
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [showOwnerDashboard, setShowOwnerDashboard] = useState(false);
   const [langModalOpen, setLangModalOpen] = useState(false);
 
-  // Instant stale-while-revalidate feed + 10-per-page pagination
-  const [items, setItems] = useState<MarketplaceItem[]>(initialCache);
+  // Live Supabase feed + 10-per-page pagination
+  const [items, setItems] = useState<MarketplaceItem[]>([]);
   const [hotDealItems, setHotDealItems] = useState<MarketplaceItem[]>([]);
-  const [loadingItems, setLoadingItems] = useState(initialCache.length === 0);
+  const [loadingItems, setLoadingItems] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [productsLoaded, setProductsLoaded] = useState(initialCache.length > 0);
+  const [productsLoaded, setProductsLoaded] = useState(false);
   const [page, setPage] = useState(1);
-  const [totalItemsCount, setTotalItemsCount] = useState(initialCache.length);
+  const [totalItemsCount, setTotalItemsCount] = useState(0);
   const [hasMore, setHasMore] = useState(false);
 
   // Low Data / Offline Mode toggle
@@ -200,26 +192,9 @@ export default function App() {
 
   // Wishlist & Cart state
   const [wishlistIds, setWishlistIds] = useState<string[]>([]);
-  const [cartItems, setCartItems] = useState<CartItem[]>(() => {
-    try {
-      const raw = localStorage.getItem(CART_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw) as CartItem[];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [cartCheckoutActive, setCartCheckoutActive] = useState(false);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(CART_KEY, JSON.stringify(cartItems));
-    } catch {
-      // Ignore storage errors
-    }
-  }, [cartItems]);
 
   const cartCount = useMemo(
     () => cartItems.reduce((sum, entry) => sum + entry.quantity, 0),
@@ -234,23 +209,9 @@ export default function App() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedCondition, setSelectedCondition] = useState<string>('All');
-  const [selectedState, setSelectedState] = useState<string>(() => {
-    try {
-      return localStorage.getItem(SELECTED_STATE_KEY) || 'All';
-    } catch {
-      return 'All';
-    }
-  });
+  const [selectedState, setSelectedState] = useState<string>('All');
   const [selectedInstitution, setSelectedInstitution] = useState<string>('All');
   const [filterMode, setFilterMode] = useState<ItemFilterMode>('all');
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(SELECTED_STATE_KEY, selectedState);
-    } catch {
-      // Ignore storage errors
-    }
-  }, [selectedState]);
 
   const homeStates = useMemo(() => getStatesByCountry(country), [country]);
   const homeInstitutions = useMemo(() => getInstitutionsByCountry(country), [country]);
@@ -264,11 +225,10 @@ export default function App() {
   useEffect(() => {
     if (prevCountryRef.current !== country) {
       prevCountryRef.current = country;
-      const countryCache = getCachedItems(country);
-      setItems(countryCache);
+      setItems([]);
       setHotDealItems([]);
-      setTotalItemsCount(countryCache.length);
-      setLoadingItems(countryCache.length === 0);
+      setTotalItemsCount(0);
+      setLoadingItems(true);
       setPage(1);
     }
     if (
@@ -344,12 +304,12 @@ export default function App() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Fetch paginated lite items (10 products per page with 200px thumbnails only)
+  // Fetch paginated lite items from Supabase (10 products per page)
   const fetchItemsPage = useCallback(
     async (targetPage: number, append: boolean) => {
       if (append) {
         setLoadingMore(true);
-      } else if (getCachedItems(country).length === 0) {
+      } else {
         setLoadingItems(true);
       }
       try {
@@ -373,27 +333,15 @@ export default function App() {
         setHasMore(Boolean(res?.has_more));
         setItems((prev) => {
           const safePrev = Array.isArray(prev) ? prev : [];
-          const next = append
+          return append
             ? [
                 ...safePrev,
                 ...incomingItems.filter((it) => !safePrev.some((existing) => existing.id === it.id)),
               ]
             : incomingItems;
-          if (
-            !append &&
-            !debouncedSearch &&
-            selectedCategory === 'All' &&
-            selectedCondition === 'All' &&
-            selectedInstitution === 'All' &&
-            selectedState === 'All' &&
-            filterMode === 'all'
-          ) {
-            setCachedItems(next, country);
-          }
-          return next;
         });
       } catch {
-        // Offline / network error: keep cached items visible
+        // Keep current state on network errors
       } finally {
         setLoadingItems(false);
         setLoadingMore(false);
@@ -452,12 +400,8 @@ export default function App() {
       .then((res) => {
         if (res?.user) {
           setUser(res.user);
-          try {
-            if (res.user.role === 'owner' && localStorage.getItem(OWNER_VIEW_KEY) === '1') {
-              setShowOwnerDashboard(true);
-            }
-          } catch {
-            // Ignore
+          if (res.user.role === 'owner') {
+            setShowOwnerDashboard(true);
           }
           refreshUnread();
           fetchWishlist();
@@ -496,39 +440,42 @@ export default function App() {
     return () => clearInterval(timer);
   }, [fetchHotDeals]);
 
-  // Real-time SSE notification stream for logged-in user (messages + Price Drop Alerts)
+  // Real-time Supabase Realtime subscription for logged-in user (messages + Price Drop Alerts)
   useEffect(() => {
-    const token = getStoredToken();
-    if (!user || !token) return;
-    const es = new EventSource(`/api/messages/stream?token=${encodeURIComponent(token)}`);
-    es.addEventListener('new_message', (ev) => {
-      try {
-        const data = JSON.parse((ev as MessageEvent).data) as {
-          sender_name: string;
-          message: string;
-        };
-        showToast(`New message from ${data.sender_name}: "${data.message.slice(0, 45)}"`);
-        refreshUnread();
-      } catch {
-        // Ignore parse errors
-      }
-    });
-    es.addEventListener('want_alert_match', (ev) => {
-      try {
-        const match = JSON.parse((ev as MessageEvent).data) as WantAlertMatch;
-        showToast(
-          `PRICE ALERT MATCH! "${match.item_title}" just posted for ${formatMoney(match.item_price)}!`
-        );
-        fetchItemsPage(1, false);
-        fetchHotDeals();
-      } catch {
-        // Ignore
-      }
-    });
+    if (!user) return;
+    const channel = supabase
+      .channel(`app-live-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const row = payload.new as { sender_id?: string; receiver_id?: string; message?: string };
+          if (row.receiver_id === user.id || (row.sender_id && row.sender_id !== user.id)) {
+            showToast(`New message: "${String(row.message || '').slice(0, 45)}"`);
+            refreshUnread();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications' },
+        (payload) => {
+          const row = payload.new as { user_id?: string; title?: string; body?: string; type?: string };
+          if (row.user_id === user.id) {
+            showToast(`${row.title || 'Update'}: ${row.body || ''}`);
+            if (row.type === 'want_alert_match') {
+              fetchItemsPage(1, false);
+              fetchHotDeals();
+            }
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
-      es.close();
+      supabase.removeChannel(channel);
     };
-  }, [user?.id, fetchItemsPage, fetchHotDeals, formatMoney]);
+  }, [user?.id, fetchItemsPage, fetchHotDeals]);
 
   // Client-side instant filter over currently loaded/cached items (0ms responsiveness offline or typing)
   const filteredItems = useMemo(() => {
@@ -822,11 +769,6 @@ export default function App() {
     setUser(null);
     setShowOwnerDashboard(false);
     setCartCheckoutActive(false);
-    try {
-      localStorage.removeItem(OWNER_VIEW_KEY);
-    } catch {
-      // Ignore
-    }
     setUnreadCount(0);
     setWishlistIds([]);
     setActiveChatTarget(null);
@@ -1031,17 +973,10 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 mx-auto w-full max-w-7xl px-3.5 sm:px-6 pt-4 pb-24 md:pb-12">
-        {showOwnerDashboard ? (
+        {showOwnerDashboard && user?.role === 'owner' ? (
           <Suspense fallback={<TabFallback />}>
             <OwnerDashboardView
-              onBack={() => {
-                setShowOwnerDashboard(false);
-                try {
-                  localStorage.removeItem(OWNER_VIEW_KEY);
-                } catch {
-                  // Ignore
-                }
-              }}
+              onBack={() => setShowOwnerDashboard(false)}
               onAdsUpdated={(s) => setAdSettings(s)}
             />
           </Suspense>
@@ -1664,15 +1599,8 @@ export default function App() {
                     };
                     const itemCountry = newItem.country || country;
                     if (country === 'All' || itemCountry.toLowerCase() === country.toLowerCase()) {
-                      setItems((prev) => {
-                        const next = [liteNew, ...prev];
-                        setCachedItems(next, country);
-                        return next;
-                      });
+                      setItems((prev) => [liteNew, ...prev]);
                       setTotalItemsCount((c) => c + 1);
-                    } else {
-                      const prevCountryCache = getCachedItems(itemCountry);
-                      setCachedItems([liteNew, ...prevCountryCache], itemCountry);
                     }
                     setActiveTab('home');
                     showToast('Your item is now live in the marketplace!');
@@ -1749,11 +1677,8 @@ export default function App() {
                   onUserUpdated={(u) => setUser(u)}
                   onLogout={handleLogout}
                   onOpenOwnerDashboard={() => {
-                    setShowOwnerDashboard(true);
-                    try {
-                      localStorage.setItem(OWNER_VIEW_KEY, '1');
-                    } catch {
-                      // Ignore
+                    if (user?.role === 'owner') {
+                      setShowOwnerDashboard(true);
                     }
                   }}
                   onNavigateTab={(tab) => {
@@ -1919,14 +1844,11 @@ export default function App() {
               }
               if (loggedInUser.role === 'owner') {
                 setShowOwnerDashboard(true);
-                try {
-                  localStorage.setItem(OWNER_VIEW_KEY, '1');
-                } catch {
-                  // Ignore
-                }
-              } else if (isNewSignup) {
+              } else {
                 setShowOwnerDashboard(false);
-                setActiveTab('profile');
+                if (isNewSignup) {
+                  setActiveTab('profile');
+                }
               }
               refreshUnread();
               fetchWishlist();

@@ -55,7 +55,7 @@ export const ServiceProfileModal: React.FC<ServiceProfileModalProps> = ({
   if (!service) return null;
 
   const isOwnerOrProvider =
-    user && (user.id === service.provider_id || user.phone_number === '07089628626');
+    user && (user.id === service.provider_id || user.role === 'owner');
 
   const handleBook = async (e: React.FormEvent) => {
     e.preventDefault();

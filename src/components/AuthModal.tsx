@@ -453,6 +453,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             onClick={() => {
               setMode('login');
               setError('');
+              setInfoMessage('');
             }}
             className={`min-h-[44px] rounded-lg text-sm font-bold transition-colors ${
               mode === 'login' ? 'bg-white text-green-900 shadow-sm' : 'text-slate-600'
@@ -466,6 +467,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               setMode('signup');
               setStep(1);
               setError('');
+              setInfoMessage('');
             }}
             className={`min-h-[44px] rounded-lg text-sm font-bold transition-colors ${
               mode === 'signup' ? 'bg-white text-green-900 shadow-sm' : 'text-slate-600'
@@ -559,13 +561,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Full / Business Name (Required for Owner Login)
+                  Full / Business Name (Optional)
                 </label>
                 <input
                   type="text"
                   value={loginName}
                   onChange={(e) => setLoginName(e.target.value)}
-                  placeholder="Optional for buyers/sellers; required for Owner"
+                  placeholder="Enter account or business name if applicable"
                   className="w-full min-h-[44px] rounded-xl border border-slate-300 px-4 text-sm focus:border-green-700 focus:outline-none"
                 />
               </div>

@@ -501,7 +501,7 @@ export const OwnerDashboardView: React.FC<OwnerDashboardViewProps> = ({
                     </strong>
                   </div>
                 </div>
-                {u.phone_number !== '07089628626' && (
+                {u.role !== 'owner' && (
                   <button
                     type="button"
                     onClick={() => handleToggleBlockUser(u.phone_number, !u.blocked)}

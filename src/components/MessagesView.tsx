@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { api, formatTimeAgo } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
-import { supabaseClient } from '../lib/supabaseClient';
+import { supabase } from '../lib/supabaseClient';
 import type {
   ChatMessage,
   ChatThread,
@@ -135,25 +135,21 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       }
     };
 
-    const channel = supabaseClient
-      ? supabaseClient
-          .channel(`messages-live-${user.id}`)
-          .on(
-            'postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'messages' },
-            () => {
-              refreshActive();
-            }
-          )
-          .subscribe()
-      : null;
+    const channel = supabase
+      .channel(`messages-live-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        () => {
+          refreshActive();
+        }
+      )
+      .subscribe();
 
-    const interval = setInterval(refreshActive, 3500);
+    const interval = setInterval(refreshActive, 5000);
     return () => {
       clearInterval(interval);
-      if (channel && supabaseClient) {
-        supabaseClient.removeChannel(channel);
-      }
+      supabase.removeChannel(channel);
     };
   }, [user?.id, activeChatTarget?.itemId, activeChatTarget?.partnerId]);
 
@@ -195,7 +191,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         partner_id: activeChatTarget.partnerId,
         message: text,
       });
-      setMessages((prev) => [...prev, res.message]);
+      setMessages((prev) =>
+        prev.some((m) => m.id === res.message.id) ? prev : [...prev, res.message]
+      );
       loadThreads();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Message failed to send.');

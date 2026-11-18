@@ -51,8 +51,6 @@ import { BadgeRow } from './BadgePill';
 import type { NavTab } from './BottomNav';
 import { PaystackFeeModal, PaystackFeeRequest } from './PaystackFeeModal';
 
-const OWNER_PHONE = '07089628626';
-
 interface ProfileViewProps {
   user: PublicUser | null;
   allItems: MarketplaceItem[];
@@ -199,7 +197,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     );
   }
 
-  const isOwner = user.role === 'owner' || user.phone_number === OWNER_PHONE;
+  const isOwner = user.role === 'owner';
   const isTrader = user.badges?.includes('trader');
   const isServiceProvider = user.badges?.includes('service_provider');
   const isStudent = !isTrader && !isServiceProvider;
@@ -456,7 +454,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 pb-8">
-      {/* Private Owner Access Card — Only visible to 07089628626 */}
+      {/* Private Owner Access Card — Only visible when profile.role === 'owner' */}
       {isOwner && (
         <div className="rounded-2xl bg-green-900 text-white p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
           <div className="flex items-start gap-3">
