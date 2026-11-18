@@ -30,6 +30,7 @@ import {
   buildWhatsAppShareUrl,
   compressAndValidateVideo,
   formatTimeAgo,
+  getStoredToken,
 } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
 import type { MarketplaceItem, RatingRecord } from '../types';
@@ -42,6 +43,7 @@ interface ItemDetailModalProps {
   onToggleWishlist?: (item: MarketplaceItem) => void;
   onClose: () => void;
   onBuyNow: (item: MarketplaceItem) => void;
+  onAddToCart?: (item: MarketplaceItem) => void;
   onChat: (item: MarketplaceItem, prefillMessage?: string) => void;
   onReportItem: (item: MarketplaceItem) => void;
   onBlockSeller: (item: MarketplaceItem) => void;
@@ -54,6 +56,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
   onToggleWishlist,
   onClose,
   onBuyNow,
+  onAddToCart,
   onChat,
   onReportItem,
   onBlockSeller,
@@ -67,7 +70,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
   const [actionSheet, setActionSheet] = useState<'offer' | null>(null);
   const [offerAmount, setOfferAmount] = useState('');
 
-  // Seller Trust Score + 5-sec Video Reviews
+  // Seller Trust Score + 5-sec Video Reviews (only unlocked for verified buyers of this specific item)
   const [ratingScore, setRatingScore] = useState(5);
   const [ratingComment, setRatingComment] = useState('');
   const [reviewVideoUrl, setReviewVideoUrl] = useState('');
@@ -78,6 +81,8 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
   const [sellerReviews, setSellerReviews] = useState<RatingRecord[]>([]);
   const [trustAvg, setTrustAvg] = useState<number>(item?.seller_rating || 5.0);
   const [trustCount, setTrustCount] = useState<number>(item?.seller_reviews_count || 0);
+  const [hasConfirmedOrder, setHasConfirmedOrder] = useState(false);
+  const [loadingTrust, setLoadingTrust] = useState(false);
 
   useEffect(() => {
     setPhotoIdx(0);
@@ -88,6 +93,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
     setRatingComment('');
     setReviewVideoUrl('');
     setReviewError('');
+    setHasConfirmedOrder(false);
 
     if (!item) return;
 
@@ -95,18 +101,33 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
     setTrustCount(item.seller_reviews_count || 0);
 
     let cancelled = false;
+    setLoadingTrust(true);
     api
-      .getRatings('seller', item.seller_id)
-      .then((res) => {
-        if (!cancelled) {
-          setSellerReviews(res.ratings);
-          if (res.count > 0) {
-            setTrustAvg(res.average);
-            setTrustCount(res.count);
+      .getRatings('seller', item.seller_id, item.id)
+      .then(async (res) => {
+        if (cancelled) return;
+        setSellerReviews(Array.isArray(res.ratings) ? res.ratings : []);
+        setTrustCount(res.count || 0);
+        setTrustAvg(res.count > 0 ? res.average : item.seller_rating || 5.0);
+        let eligible = Boolean(res.has_confirmed_order);
+        if (!eligible && getStoredToken()) {
+          try {
+            const ordRes = await api.getOrders();
+            eligible = (ordRes.buyer_orders || []).some(
+              (o) => o.item_id === item.id && o.order_status === 'delivered_confirmed'
+            );
+          } catch {
+            // Keep backend flag
           }
         }
+        if (!cancelled) {
+          setHasConfirmedOrder(eligible);
+        }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingTrust(false);
+      });
 
     if (lowDataMode) return () => { cancelled = true; };
 
@@ -194,12 +215,17 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
 
   const handleRateSeller = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!hasConfirmedOrder) {
+      setReviewError(
+        'Only buyers with a confirmed completed Paystack order for this item can submit a review.'
+      );
+      return;
+    }
     setReviewError('');
     setRatingSubmitting(true);
     try {
-      const res = await api.addRating({
-        target_type: 'seller',
-        target_id: activeItem.seller_id,
+      const res = await api.submitProductReview({
+        seller_id: activeItem.seller_id,
         item_id: activeItem.id,
         score: ratingScore,
         comment: ratingComment,
@@ -214,7 +240,11 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
       setTrustCount(nextCount);
       setTrustAvg(nextAvg);
     } catch (err) {
-      setReviewError(err instanceof Error ? err.message : 'Sign in to leave a star or video review.');
+      setReviewError(
+        err instanceof Error
+          ? err.message
+          : 'You must have a confirmed completed order for this item to submit a review.'
+      );
       setRatingSaved(false);
     } finally {
       setRatingSubmitting(false);
@@ -392,8 +422,8 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
             </div>
           </div>
 
-          {/* Primary Action Buttons: Buy Now (Paystack), Make Offer, Share WhatsApp, Report Scam */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          {/* Primary Action Buttons: Buy Now (Paystack), Add to Cart, Make Offer, Share WhatsApp, Report Scam */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
             <button
               type="button"
               onClick={() => onBuyNow(activeItem)}
@@ -402,6 +432,16 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
               <ShoppingCart className="w-4 h-4 shrink-0" />
               <span>{t('buy_now')}</span>
             </button>
+            {onAddToCart && (
+              <button
+                type="button"
+                onClick={() => onAddToCart(activeItem)}
+                className="min-h-[48px] rounded-xl border border-green-700 bg-green-50 text-green-900 font-extrabold text-sm px-3 flex items-center justify-center gap-1.5 hover:bg-green-100"
+              >
+                <ShoppingCart className="w-4 h-4 shrink-0" />
+                <span>Add to Cart</span>
+              </button>
+            )}
             {activeItem.make_offer !== false && (
               <button
                 type="button"
@@ -520,14 +560,24 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                 )}
               </div>
               <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-base font-bold text-slate-900 truncate">
-                    {activeItem.seller_name}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-base font-bold text-slate-900 truncate flex items-center gap-1.5 flex-wrap">
+                    <span className="truncate">
+                      {activeItem.seller_shop_name
+                        ? `${activeItem.seller_name} · ${activeItem.seller_shop_name}`
+                        : activeItem.seller_name}
+                    </span>
+                    <span
+                      className="inline-flex items-center gap-1 rounded-lg bg-amber-50 border border-amber-200 px-2 py-0.5 text-xs font-extrabold text-amber-700 shrink-0 tabular-nums"
+                      title="Live Seller Average Star Rating"
+                    >
+                      <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                      {loadingTrust ? '...' : trustAvg.toFixed(1)}{' '}
+                      <span className="text-slate-600 font-semibold">
+                        ({trustCount} {trustCount === 1 ? 'review' : 'reviews'})
+                      </span>
+                    </span>
                   </div>
-                  <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 border border-amber-200 px-2 py-0.5 text-xs font-extrabold text-amber-700 shrink-0 tabular-nums">
-                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
-                    {trustAvg.toFixed(1)} ({trustCount} {trustCount === 1 ? 'review' : 'reviews'})
-                  </span>
                 </div>
                 <BadgeRow badges={activeItem.seller_badges} size="sm" />
               </div>
@@ -556,20 +606,21 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
               </span>
             </div>
 
-            {/* Trust Score Rating + 5-sec Video Review after Delivery */}
+            {/* Trust Score Rating + 5-sec Video Review after Verified Completed Order */}
             <form onSubmit={handleRateSeller} className="pt-2 border-t border-slate-100 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800">
-                  Trust Score &amp; 5-sec Video Review (After Delivery)
+                  Trust Score &amp; 5-sec Video Review (Verified Buyers Only)
                 </span>
                 <div className="flex items-center gap-1">
                   {[1, 2, 3, 4, 5].map((n) => (
                     <button
                       key={n}
                       type="button"
+                      disabled={!hasConfirmedOrder}
                       onClick={() => setRatingScore(n)}
                       aria-label={`Rate ${n} stars`}
-                      className="p-0.5"
+                      className="p-0.5 disabled:opacity-50"
                     >
                       <Star
                         className={`w-4 h-4 ${
@@ -581,25 +632,40 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                 </div>
               </div>
 
+              {!hasConfirmedOrder && !ratingSaved && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11px] font-semibold text-amber-900">
+                  Buy this item via Paystack and confirm delivery in <strong>Profile &gt; My Orders</strong> to unlock <strong>Submit Review</strong>.
+                </div>
+              )}
+
               {reviewError && (
                 <div className="text-xs font-semibold text-red-700">{reviewError}</div>
               )}
 
               {ratingSaved ? (
                 <div className="text-xs font-bold text-green-700">
-                  Thanks! Your Trust Score rating &amp; review has been saved.
+                  Thanks! Your verified buyer rating &amp; review has been saved.
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap sm:flex-nowrap gap-2">
                     <input
                       type="text"
+                      disabled={!hasConfirmedOrder}
                       value={ratingComment}
                       onChange={(e) => setRatingComment(e.target.value)}
-                      placeholder="Write review after delivery..."
-                      className="flex-1 min-h-[38px] rounded-lg border border-slate-300 px-2.5 text-xs"
+                      placeholder={
+                        hasConfirmedOrder
+                          ? 'Write review after delivery...'
+                          : 'Verified buyers with completed order only'
+                      }
+                      className="flex-1 min-w-[160px] min-h-[38px] rounded-lg border border-slate-300 px-2.5 text-xs disabled:bg-slate-100 disabled:text-slate-500"
                     />
-                    <label className="min-h-[38px] px-2.5 rounded-lg border border-slate-300 bg-slate-50 text-xs font-bold text-slate-700 inline-flex items-center gap-1 cursor-pointer hover:bg-slate-100 shrink-0">
+                    <label
+                      className={`min-h-[38px] px-2.5 rounded-lg border border-slate-300 bg-slate-50 text-xs font-bold text-slate-700 inline-flex items-center gap-1 shrink-0 ${
+                        hasConfirmedOrder ? 'cursor-pointer hover:bg-slate-100' : 'opacity-50 cursor-not-allowed'
+                      }`}
+                    >
                       <Video className="w-3.5 h-3.5 text-green-700" />
                       <span>
                         {compressingReviewVid
@@ -611,16 +677,17 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                       <input
                         type="file"
                         accept="video/*"
+                        disabled={!hasConfirmedOrder}
                         onChange={handleReviewVideoUpload}
                         className="hidden"
                       />
                     </label>
                     <button
                       type="submit"
-                      disabled={ratingSubmitting || compressingReviewVid}
-                      className="min-h-[38px] px-3 rounded-lg bg-slate-800 text-white text-xs font-bold disabled:opacity-60"
+                      disabled={!hasConfirmedOrder || ratingSubmitting || compressingReviewVid}
+                      className="min-h-[38px] px-3.5 rounded-lg bg-green-700 text-white text-xs font-extrabold hover:bg-green-800 disabled:bg-slate-300 disabled:text-slate-600 disabled:cursor-not-allowed shrink-0"
                     >
-                      {ratingSubmitting ? '...' : 'Rate'}
+                      {ratingSubmitting ? 'Saving...' : 'Submit Review'}
                     </button>
                   </div>
                 </div>

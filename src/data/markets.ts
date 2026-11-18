@@ -267,6 +267,19 @@ export const MARKET_GROUPS: MarketLocationGroup[] = [
     stateOrCity: 'Guinea-Bissau',
     markets: ['Bandim Market Bissau'],
   },
+  {
+    id: 'wa-cameroon',
+    region: 'West Africa',
+    country: 'Cameroon',
+    stateOrCity: 'Cameroon',
+    markets: [
+      'Marché Central Douala',
+      'Mokolo Market Yaoundé',
+      'Muea Market Buea',
+      'Marché Mboppi Douala',
+      'Bamenda Main Market',
+    ],
+  },
 
   // === SOUTH AFRICA ===
   {

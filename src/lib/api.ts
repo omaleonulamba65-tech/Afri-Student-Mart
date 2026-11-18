@@ -16,11 +16,12 @@ import type {
   TraderShop,
   WantAlert,
 } from '../types';
+import { inferCountryFromLocationText } from '../data/countryDocuments';
 import { getCountryConfig } from '../data/languages';
 import { supabaseClient } from './supabaseClient';
 
 const TOKEN_KEY = 'afri_student_mart_token';
-const ITEMS_CACHE_KEY = 'afri_student_mart_items_cache_v2';
+const ITEMS_CACHE_KEY = 'afri_student_mart_items_cache_v3';
 const LOW_DATA_KEY = 'afri_student_mart_low_data_mode';
 
 const itemDetailCache = new Map<string, MarketplaceItem>();
@@ -64,9 +65,14 @@ export function setLowDataMode(enabled: boolean) {
   }
 }
 
-export function getCachedItems(): MarketplaceItem[] {
+function getCacheKeyForCountry(country = 'All'): string {
+  const slug = (country || 'All').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  return `${ITEMS_CACHE_KEY}_${slug}`;
+}
+
+export function getCachedItems(country = 'All'): MarketplaceItem[] {
   try {
-    const raw = localStorage.getItem(ITEMS_CACHE_KEY);
+    const raw = localStorage.getItem(getCacheKeyForCountry(country));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as MarketplaceItem[];
     return Array.isArray(parsed) ? parsed : [];
@@ -75,15 +81,15 @@ export function getCachedItems(): MarketplaceItem[] {
   }
 }
 
-export function setCachedItems(items: MarketplaceItem[]) {
+export function setCachedItems(items: MarketplaceItem[], country = 'All') {
   try {
-    // Store lightweight copy (thumbnails only, max 30 items) so localStorage stays tiny and instant
+    // Store lightweight copy (thumbnails only, max 30 items) scoped strictly per country
     const lite = items.slice(0, 30).map((it) => ({
       ...it,
       photos: it.thumbnails?.length ? it.thumbnails : it.photos.slice(0, 1),
       video_url: '',
     }));
-    localStorage.setItem(ITEMS_CACHE_KEY, JSON.stringify(lite));
+    localStorage.setItem(getCacheKeyForCountry(country), JSON.stringify(lite));
   } catch {
     // Ignore quota errors
   }
@@ -368,6 +374,14 @@ function parseSupabasePhotos(raw: unknown): string[] {
 
 function mapSupabaseItemRow(row: Record<string, unknown>): MarketplaceItem {
   const photos = parseSupabasePhotos(row.photos);
+  const inst = String(row.institution || '');
+  const loc = String(row.location || '');
+  const inferredCountry = inferCountryFromLocationText(
+    inst,
+    loc,
+    typeof row.country === 'string' ? row.country : undefined
+  );
+  const cfg = getCountryConfig(inferredCountry);
   return {
     id: String(row.id || ''),
     title: String(row.title || 'Marketplace Item'),
@@ -384,16 +398,17 @@ function mapSupabaseItemRow(row: Record<string, unknown>): MarketplaceItem {
     seller_id: String(row.seller_phone || row.id || ''),
     seller_name: 'Campus Seller',
     seller_profile_pic: '',
-    seller_institution: String(row.institution || ''),
+    seller_institution: inst,
     seller_badges: ['student'],
     seller_rating: 5.0,
     seller_reviews_count: 0,
     seller_joined_at: String(row.created_at || new Date().toISOString()),
     seller_items_count: 1,
-    institution: String(row.institution || ''),
-    location: String(row.location || ''),
-    country: 'Nigeria',
-    country_code: '+234',
+    institution: inst,
+    location: loc,
+    state: typeof row.state === 'string' ? row.state : undefined,
+    country: cfg.country,
+    country_code: cfg.dialCode,
     distance_km: 1,
     is_featured: false,
     report_count: 0,
@@ -428,6 +443,11 @@ export const api = {
     payout_account_name?: string;
     country?: string;
     language?: string;
+    id_doc_type?: string;
+    id_doc_number?: string;
+    business_reg_type?: string;
+    business_reg_number?: string;
+    secondary_reg_number?: string;
   }) =>
     apiFetch<{ token: string; user: PublicUser }>('/api/auth/signup', {
       method: 'POST',
@@ -472,6 +492,7 @@ export const api = {
     condition?: string;
     institution?: string;
     market?: string;
+    state?: string;
     country?: string;
     sellerId?: string;
     filterMode?: ItemFilterMode;
@@ -492,6 +513,7 @@ export const api = {
     if (params?.condition && params.condition !== 'All') qs.set('condition', params.condition);
     if (params?.institution && params.institution !== 'All') qs.set('institution', params.institution);
     if (params?.market) qs.set('market', params.market);
+    if (params?.state && params.state !== 'All') qs.set('state', params.state);
     if (params?.country && params.country !== 'All') qs.set('country', params.country);
     if (params?.sellerId) qs.set('sellerId', params.sellerId);
     if (params?.filterMode && params.filterMode !== 'all') qs.set('filterMode', params.filterMode);
@@ -519,6 +541,19 @@ export const api = {
         return { items: [], total: 0, page: pageNum, has_more: false };
       }
       let mapped = data.map((r) => mapSupabaseItemRow(r as Record<string, unknown>));
+      if (params?.country && params.country !== 'All') {
+        const tc = params.country.trim().toLowerCase();
+        mapped = mapped.filter((it) => (it.country || '').toLowerCase() === tc);
+      }
+      if (params?.state && params.state !== 'All') {
+        const ts = params.state.trim().toLowerCase();
+        mapped = mapped.filter(
+          (it) =>
+            (it.state || '').toLowerCase().includes(ts) ||
+            it.location.toLowerCase().includes(ts) ||
+            it.institution.toLowerCase().includes(ts)
+        );
+      }
       if (params?.category && params.category !== 'All') {
         const c = params.category.toLowerCase();
         mapped = mapped.filter((it) => it.category.toLowerCase().includes(c));
@@ -638,10 +673,19 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  getRatings: (targetType: 'seller' | 'service' | 'shop', targetId: string) =>
-    apiFetch<{ ratings: RatingRecord[]; average: number; count: number }>(
-      `/api/ratings?target_type=${encodeURIComponent(targetType)}&target_id=${encodeURIComponent(targetId)}`
-    ),
+  getRatings: (targetType: 'seller' | 'service' | 'shop', targetId: string, itemId?: string) => {
+    const qs = new URLSearchParams({
+      target_type: targetType,
+      target_id: targetId,
+    });
+    if (itemId) qs.set('item_id', itemId);
+    return apiFetch<{
+      ratings: RatingRecord[];
+      average: number;
+      count: number;
+      has_confirmed_order?: boolean;
+    }>(`/api/ratings?${qs.toString()}`);
+  },
 
   addRating: (payload: {
     target_type: 'seller' | 'service' | 'shop';
@@ -654,6 +698,25 @@ export const api = {
     apiFetch<{ rating: RatingRecord }>('/api/ratings', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+
+  submitProductReview: (payload: {
+    seller_id: string;
+    item_id: string;
+    score: number;
+    comment: string;
+    video_url?: string;
+  }) =>
+    apiFetch<{ rating: RatingRecord }>('/api/ratings', {
+      method: 'POST',
+      body: JSON.stringify({
+        target_type: 'seller',
+        target_id: payload.seller_id,
+        item_id: payload.item_id,
+        score: payload.score,
+        comment: payload.comment,
+        video_url: payload.video_url,
+      }),
     }),
 
   getWantAlerts: () => apiFetch<{ alerts: WantAlert[] }>('/api/want-alerts'),

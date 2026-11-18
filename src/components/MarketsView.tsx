@@ -25,6 +25,7 @@ interface MarketsViewProps {
   onToggleWishlist: (item: MarketplaceItem) => void;
   onViewDetails: (item: MarketplaceItem) => void;
   onBuyNow: (item: MarketplaceItem) => void;
+  onAddToCart?: (item: MarketplaceItem) => void;
   onChat: (item: MarketplaceItem) => void;
   onReport: (item: MarketplaceItem) => void;
   onPostItem: () => void;
@@ -37,6 +38,7 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
   onToggleWishlist,
   onViewDetails,
   onBuyNow,
+  onAddToCart,
   onChat,
   onReport,
   onPostItem,
@@ -122,7 +124,7 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
     const core = mLower.replace(/\s+market$/i, '').trim();
 
     Promise.all([
-      api.getItems({ market: selectedMarket.name, lite: true }),
+      api.getItems({ market: selectedMarket.name, country: selectedMarket.country, lite: true }),
       api.getShops().catch(() => ({ shops: [] as TraderShop[] })),
     ])
       .then(([itemsRes, shopsRes]) => {
@@ -285,6 +287,7 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
                   onToggleWishlist={onToggleWishlist}
                   onViewDetails={onViewDetails}
                   onBuyNow={onBuyNow}
+                  onAddToCart={onAddToCart}
                   onChat={onChat}
                   onReport={onReport}
                 />
@@ -349,11 +352,16 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
               type="button"
               onClick={() => {
                 setRegionFilter(reg);
-                setCountryFilter('All');
+                if (reg === 'Nigeria' || reg === 'South Africa') {
+                  setCountryFilter(reg);
+                  setCountryOnly(reg);
+                } else {
+                  setCountryFilter('All');
+                }
                 setStateFilter('All');
               }}
               className={`min-h-[40px] px-4 rounded-xl text-xs sm:text-sm font-extrabold border inline-flex items-center gap-1.5 ${
-                regionFilter === reg && countryFilter === 'All'
+                regionFilter === reg && (countryFilter === 'All' || countryFilter === reg)
                   ? 'bg-green-700 text-white border-green-700'
                   : 'bg-white text-slate-800 border-slate-300 hover:border-green-700'
               }`}

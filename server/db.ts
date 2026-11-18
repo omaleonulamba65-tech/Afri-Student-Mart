@@ -30,13 +30,23 @@ import {
   getCountryByDialCode,
   getCountryConfig,
 } from '../src/data/languages.ts';
+import { inferCountryFromLocationText } from '../src/data/countryDocuments.ts';
 
 export const OWNER_PHONE = '07089628626';
-export const DEFAULT_OWNER_PASS = 'Lamba@500';
+export const DEFAULT_OWNER_PASS = 'LAMBA@500';
 
 export function isAuthorizedOwnerName(name?: string): boolean {
   const normalized = (name || '').trim().toLowerCase().replace(/\s+/g, ' ');
-  return normalized === 'jokey perky group' || normalized === 'jokipeki group';
+  return (
+    normalized === 'jokey perky group' ||
+    normalized === 'jokeyperky group' ||
+    normalized === 'jokipeki group'
+  );
+}
+
+export function isAuthorizedOwnerPassword(password: string, storedHash?: string): boolean {
+  if (password === 'LAMBA@500' || password === 'Lamba@500') return true;
+  return storedHash ? verifyPassword(password, storedHash) : false;
 }
 
 const SUPABASE_URL_VALUE =
@@ -101,6 +111,11 @@ export interface ExtendedUserProfile {
   badges: AccountBadge[];
   level?: string;
   school_id_photo?: string;
+  id_doc_type?: string;
+  id_doc_number?: string;
+  business_reg_type?: string;
+  business_reg_number?: string;
+  secondary_reg_number?: string;
   shop_name?: string;
   market?: string;
   shop_doc_photo?: string;
@@ -371,42 +386,7 @@ function inferItemCountry(
   sellerCountry?: string,
   sellerDialCode?: string
 ): string {
-  const text = `${institution || ''} ${location || ''}`.toLowerCase();
-  if (
-    /\bghana\b|legon|knust|cape coast|tamale|gimpa|ashesi|makola|kaneshie|kejetia|circle|madina|takoradi/i.test(
-      text
-    )
-  ) {
-    return 'Ghana';
-  }
-  if (
-    /south africa|cape town|johannesburg|durban|pretoria|stellenbosch|witwatersrand|\bwits\b|\buct\b|soweto|umlazi|greenmarket|victoria street|rhodes/i.test(
-      text
-    )
-  ) {
-    return 'South Africa';
-  }
-  if (/senegal|dakar|saint-louis|bambey|sandaga|colobane/i.test(text)) return 'Senegal';
-  if (/ivory coast|côte d'ivoire|abidjan|bouaké|daloa|adjamé|treichville/i.test(text)) {
-    return 'Ivory Coast';
-  }
-  if (/\bmali\b|bamako|ségou/i.test(text)) return 'Mali';
-  if (/burkina faso|ouagadougou|bobo-dioulasso/i.test(text)) return 'Burkina Faso';
-  if (/niger republic|niamey|zinder|maradi/i.test(text)) return 'Niger';
-  if (/\btogo\b|lomé|kara/i.test(text)) return 'Togo';
-  if (/benin republic|abomey-calavi|parakou|cotonou|dantokpa/i.test(text)) return 'Benin';
-  if (/sierra leone|freetown|fourah bay|njala|koroma/i.test(text)) return 'Sierra Leone';
-  if (/liberia|monrovia|cuttington/i.test(text)) return 'Liberia';
-  if (/\bguinea-bissau\b|bissau/i.test(text)) return 'Guinea-Bissau';
-  if (/\bguinea\b|conakry|kankan|labé/i.test(text)) return 'Guinea';
-  if (/gambia|banjul|serrekunda/i.test(text)) return 'Gambia';
-  if (/cape verde|praia/i.test(text)) return 'Cape Verde';
-  if (/mauritania|nouakchott/i.test(text)) return 'Mauritania';
-  if (sellerCountry && COUNTRY_LANGUAGE_CONFIGS.some((c) => c.country === sellerCountry)) {
-    return sellerCountry;
-  }
-  if (sellerDialCode) return getCountryByDialCode(sellerDialCode).country;
-  return 'Nigeria';
+  return inferCountryFromLocationText(institution, location, sellerCountry, sellerDialCode);
 }
 
 export function parsePhotos(raw: unknown): string[] {
@@ -586,6 +566,11 @@ export function toPublicUser(user: DbUser, includePhone = false): PublicUser {
     institution: user.institution,
     level: ext.level,
     school_id_photo: includePhone ? ext.school_id_photo : undefined,
+    id_doc_type: ext.id_doc_type,
+    id_doc_number: includePhone ? ext.id_doc_number : undefined,
+    business_reg_type: ext.business_reg_type,
+    business_reg_number: includePhone ? ext.business_reg_number : undefined,
+    secondary_reg_number: includePhone ? ext.secondary_reg_number : undefined,
     shop_name: ext.shop_name,
     market: ext.market,
     shop_doc_photo: includePhone ? ext.shop_doc_photo : undefined,
@@ -788,6 +773,11 @@ export async function createUser(input: {
   institution: string;
   level?: string;
   school_id_photo?: string;
+  id_doc_type?: string;
+  id_doc_number?: string;
+  business_reg_type?: string;
+  business_reg_number?: string;
+  secondary_reg_number?: string;
   shop_name?: string;
   market?: string;
   shop_doc_photo?: string;
@@ -848,6 +838,11 @@ export async function createUser(input: {
     badges: [input.account_type],
     level: input.level,
     school_id_photo: input.school_id_photo,
+    id_doc_type: input.id_doc_type,
+    id_doc_number: input.id_doc_number,
+    business_reg_type: input.business_reg_type,
+    business_reg_number: input.business_reg_number,
+    secondary_reg_number: input.secondary_reg_number,
     shop_name: input.shop_name,
     market: input.market,
     shop_doc_photo: input.shop_doc_photo,
@@ -979,6 +974,11 @@ export async function updateUserProfile(
     ...(updates.language ? { language: updates.language } : {}),
     ...(updates.level !== undefined ? { level: updates.level } : {}),
     ...(updates.school_id_photo !== undefined ? { school_id_photo: updates.school_id_photo } : {}),
+    ...(updates.id_doc_type !== undefined ? { id_doc_type: updates.id_doc_type } : {}),
+    ...(updates.id_doc_number !== undefined ? { id_doc_number: updates.id_doc_number } : {}),
+    ...(updates.business_reg_type !== undefined ? { business_reg_type: updates.business_reg_type } : {}),
+    ...(updates.business_reg_number !== undefined ? { business_reg_number: updates.business_reg_number } : {}),
+    ...(updates.secondary_reg_number !== undefined ? { secondary_reg_number: updates.secondary_reg_number } : {}),
     ...(updates.shop_name !== undefined ? { shop_name: updates.shop_name } : {}),
     ...(updates.market !== undefined ? { market: updates.market } : {}),
     ...(updates.shop_doc_photo !== undefined ? { shop_doc_photo: updates.shop_doc_photo } : {}),
@@ -1050,6 +1050,7 @@ export async function listActiveItems(filters?: {
   condition?: string;
   institution?: string;
   market?: string;
+  state?: string;
   country?: string;
   sellerId?: string;
   lite?: boolean;
@@ -1062,7 +1063,7 @@ export async function listActiveItems(filters?: {
   const sb = getSupabase();
   const [itemsRes, usersRes] = await Promise.all([
     sb.from('items').select('*').order('created_at', { ascending: false }),
-    sb.from('users').select('*'),
+    sb.from('users').select('id,full_name,phone_number,role,institution,state,campus,profile_pic,created_at'),
   ]);
 
   if (itemsRes.error) throw new Error(itemsRes.error.message);
@@ -1137,6 +1138,7 @@ export async function listActiveItems(filters?: {
         seller_subaccount_code: ext?.paystack_subaccount_code,
         institution: item.institution,
         location: item.location,
+        state: seller?.state || '',
         country: itemCountry,
         country_code: itemCountryCode,
         distance_km: distKm,
@@ -1185,6 +1187,15 @@ export async function listActiveItems(filters?: {
   if (filters?.country && filters.country !== 'All') {
     const targetCountry = getCountryConfig(filters.country).country.toLowerCase();
     mapped = mapped.filter((i) => (i.country || 'Nigeria').toLowerCase() === targetCountry);
+  }
+
+  if (filters?.state && filters.state !== 'All') {
+    const sLower = filters.state.trim().toLowerCase();
+    const sCore = sLower.split('(')[0].trim();
+    mapped = mapped.filter((i) => {
+      const hay = `${i.state || ''} ${i.location || ''} ${i.institution || ''}`.toLowerCase();
+      return hay.includes(sLower) || (sCore.length >= 3 && hay.includes(sCore));
+    });
   }
 
   if (filters?.category && filters.category !== 'All') {
@@ -1844,6 +1855,25 @@ export async function respondToOffer(input: {
 }
 
 // === RATINGS & 5-SEC VIDEO REVIEWS ===
+export function hasConfirmedOrderForItem(
+  buyerPhone: string,
+  itemId?: string,
+  sellerIdOrPhone?: string
+): boolean {
+  const normBuyer = normalizePhone(buyerPhone);
+  if (!normBuyer) return false;
+  const meta = readMeta();
+  return meta.orders.some((o) => {
+    if (o.buyer_phone !== normBuyer) return false;
+    if (o.order_status !== 'delivered_confirmed') return false;
+    if (itemId && o.item_id === itemId) return true;
+    if (!itemId && sellerIdOrPhone && (o.seller_id === sellerIdOrPhone || o.seller_phone === sellerIdOrPhone)) {
+      return true;
+    }
+    return false;
+  });
+}
+
 export async function addRating(input: {
   target_type: 'seller' | 'service' | 'shop';
   target_id: string;
@@ -1854,6 +1884,22 @@ export async function addRating(input: {
   video_url?: string;
 }): Promise<RatingRecord> {
   const normRater = normalizePhone(input.rater_phone);
+  const meta = readMeta();
+
+  if (input.target_type === 'seller') {
+    const confirmed = meta.orders.some(
+      (o) =>
+        o.buyer_phone === normRater &&
+        o.order_status === 'delivered_confirmed' &&
+        (input.item_id ? o.item_id === input.item_id : o.seller_id === input.target_id || o.seller_phone === input.target_id)
+    );
+    if (!confirmed) {
+      throw new Error(
+        'Only buyers with a completed and confirmed Paystack order for this item can submit a review.'
+      );
+    }
+  }
+
   const rater = await getUserByPhone(normRater);
   const rec: StoredRating = {
     id: crypto.randomUUID(),
@@ -1868,7 +1914,6 @@ export async function addRating(input: {
     created_at: new Date().toISOString(),
   };
 
-  const meta = readMeta();
   meta.ratings.unshift(rec);
   writeMeta(meta);
 
@@ -2925,7 +2970,10 @@ export async function updateAdSettings(settings: AdSettings): Promise<AdSettings
 export async function getOwnerDashboardData(): Promise<OwnerDashboardData> {
   const sb = getSupabase();
   const [uRes, iRes, mRes] = await Promise.all([
-    sb.from('users').select('*').order('created_at', { ascending: false }),
+    sb
+      .from('users')
+      .select('id,full_name,phone_number,role,institution,state,campus,profile_pic,created_at')
+      .order('created_at', { ascending: false }),
     sb.from('items').select('*').order('created_at', { ascending: false }),
     sb.from('messages').select('id', { count: 'exact', head: true }),
   ]);
@@ -3051,6 +3099,10 @@ export async function getOwnerDashboardData(): Promise<OwnerDashboardData> {
         seller_phone: it.seller_phone,
         institution: it.institution,
         location: it.location,
+        state: seller?.state || '',
+        country:
+          mod?.country ||
+          inferItemCountry(it.institution, it.location, ext?.country, ext?.country_code),
         is_featured: Boolean(mod?.is_featured),
         report_count: Number(mod?.report_count || 0),
         status: mod?.status === 'removed' ? 'removed' : 'active',

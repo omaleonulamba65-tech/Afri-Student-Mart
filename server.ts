@@ -30,7 +30,9 @@ import {
   getThreadMessages,
   getUserByPhone,
   getWishlist,
+  hasConfirmedOrderForItem,
   isAuthorizedOwnerName,
+  isAuthorizedOwnerPassword,
   isUserBlocked,
   listActiveItems,
   listOffersForUser,
@@ -144,6 +146,11 @@ async function startServer() {
         institution,
         level,
         school_id_photo,
+        id_doc_type,
+        id_doc_number,
+        business_reg_type,
+        business_reg_number,
+        secondary_reg_number,
         shop_name,
         market,
         shop_doc_photo,
@@ -189,6 +196,16 @@ async function startServer() {
         res.status(400).json({ error: 'Service Providers must choose Service Category and Location.' });
         return;
       }
+      if (
+        (badgeType === 'trader' || badgeType === 'service_provider') &&
+        (!String(id_doc_number || '').trim() || !String(business_reg_number || '').trim())
+      ) {
+        res.status(400).json({
+          error:
+            'Please provide both your National ID Number and Business Registration Number for your selected country.',
+        });
+        return;
+      }
       const isSellerAccount =
         role === 'seller' || badgeType === 'trader' || badgeType === 'service_provider';
       if (isSellerAccount && (!payout_bank_name || !payout_account_number)) {
@@ -219,6 +236,11 @@ async function startServer() {
         institution: institution || market || campus || 'Campus Area',
         level,
         school_id_photo,
+        id_doc_type: id_doc_type ? String(id_doc_type) : undefined,
+        id_doc_number: id_doc_number ? String(id_doc_number).trim() : undefined,
+        business_reg_type: business_reg_type ? String(business_reg_type) : undefined,
+        business_reg_number: business_reg_number ? String(business_reg_number).trim() : undefined,
+        secondary_reg_number: secondary_reg_number ? String(secondary_reg_number).trim() : undefined,
         shop_name,
         market,
         shop_doc_photo,
@@ -249,22 +271,25 @@ async function startServer() {
       }
       const normPhone = normalizePhone(String(phone_number));
       const trimmedName = String(full_name || '').trim();
+      const rawPassword = String(password);
 
-      if (normPhone === OWNER_PHONE && !isAuthorizedOwnerName(trimmedName)) {
-        res.status(403).json({
-          error: 'Owner Double Lock: Enter exact Owner Name (Jokipeki Group or JOKEY PERKY GROUP).',
-        });
-        return;
-      }
-      if (isAuthorizedOwnerName(trimmedName) && normPhone !== OWNER_PHONE) {
-        res.status(403).json({
-          error: 'Owner Double Lock: Invalid Owner phone number.',
-        });
+      if (normPhone === OWNER_PHONE || isAuthorizedOwnerName(trimmedName)) {
+        if (normPhone !== OWNER_PHONE || !isAuthorizedOwnerName(trimmedName)) {
+          res.status(401).json({ error: 'Wrong Owner details' });
+          return;
+        }
+        const ownerUser = await getUserByPhone(OWNER_PHONE);
+        if (!ownerUser || !isAuthorizedOwnerPassword(rawPassword, ownerUser.password)) {
+          res.status(401).json({ error: 'Wrong Owner details' });
+          return;
+        }
+        const token = signSessionToken(ownerUser.phone_number);
+        res.json({ token, user: toPublicUser(ownerUser, true) });
         return;
       }
 
       const user = await getUserByPhone(normPhone);
-      if (!user || !verifyPassword(String(password), user.password)) {
+      if (!user || !verifyPassword(rawPassword, user.password)) {
         res.status(401).json({ error: 'Incorrect phone number or password.' });
         return;
       }
@@ -341,6 +366,7 @@ async function startServer() {
         condition: typeof req.query.condition === 'string' ? req.query.condition : undefined,
         institution: typeof req.query.institution === 'string' ? req.query.institution : undefined,
         market: typeof req.query.market === 'string' ? req.query.market : undefined,
+        state: typeof req.query.state === 'string' ? req.query.state : undefined,
         country: typeof req.query.country === 'string' ? req.query.country : undefined,
         sellerId: typeof req.query.sellerId === 'string' ? req.query.sellerId : undefined,
         filterMode,
@@ -585,11 +611,22 @@ async function startServer() {
     const rawType = req.query.target_type;
     const targetType = rawType === 'service' || rawType === 'shop' ? rawType : 'seller';
     const targetId = typeof req.query.target_id === 'string' ? req.query.target_id : '';
+    const itemId = typeof req.query.item_id === 'string' ? req.query.item_id : undefined;
     if (!targetId) {
       res.status(400).json({ error: 'target_id is required.' });
       return;
     }
-    res.json(listRatings(targetType, targetId));
+    const authHeader = req.headers.authorization || '';
+    const phone = authHeader.startsWith('Bearer ')
+      ? verifySessionToken(authHeader.slice(7))
+      : null;
+    const hasConfirmedOrder = phone
+      ? hasConfirmedOrderForItem(phone, itemId, targetId)
+      : false;
+    res.json({
+      ...listRatings(targetType, targetId),
+      has_confirmed_order: hasConfirmedOrder,
+    });
   });
 
   app.post('/api/ratings', requireAuth, async (req: AuthedRequest, res: Response) => {

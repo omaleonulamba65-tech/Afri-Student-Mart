@@ -74,6 +74,11 @@ export interface PublicUser {
   institution: string;
   level?: string;
   school_id_photo?: string;
+  id_doc_type?: string;
+  id_doc_number?: string;
+  business_reg_type?: string;
+  business_reg_number?: string;
+  secondary_reg_number?: string;
   shop_name?: string;
   market?: string;
   shop_doc_photo?: string;
@@ -122,6 +127,7 @@ export interface MarketplaceItem {
   seller_items_count: number;
   institution: string;
   location: string;
+  state?: string;
   country?: string;
   country_code?: string;
   distance_km?: number;
@@ -129,6 +135,11 @@ export interface MarketplaceItem {
   report_count: number;
   status: 'active' | 'removed';
   created_at: string;
+}
+
+export interface CartItem {
+  item: MarketplaceItem;
+  quantity: number;
 }
 
 export interface ItemOffer {

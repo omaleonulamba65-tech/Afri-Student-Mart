@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Camera,
   Check,
   Eye,
   EyeOff,
+  FileCheck2,
   GraduationCap,
   Loader2,
   Search,
@@ -17,8 +18,11 @@ import {
 import { Globe } from 'lucide-react';
 import { WEST_AND_SOUTH_AFRICA_COUNTRIES } from '../data/countries';
 import {
+  getCountryDocumentRequirement,
+  getStatesByCountry,
+} from '../data/countryDocuments';
+import {
   NIGERIAN_INSTITUTIONS,
-  NIGERIAN_STATES,
   getInstitutionsByCountry,
 } from '../data/institutions';
 import {
@@ -26,7 +30,7 @@ import {
   getCountryConfig,
   getCountryDisplayName,
 } from '../data/languages';
-import { ALL_MARKET_NAMES } from '../data/markets';
+import { ALL_MARKET_NAMES, getMarketsByCountry } from '../data/markets';
 import { EXACT_SAFETY_MESSAGES } from '../data/policies';
 import { api, compressImageFile } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
@@ -43,7 +47,7 @@ interface AuthModalProps {
   open: boolean;
   initialMode?: 'login' | 'signup';
   onClose: () => void;
-  onSuccess: (token: string, user: PublicUser) => void;
+  onSuccess: (token: string, user: PublicUser, isNewSignup?: boolean) => void;
   onOpenPolicy: (policyId: PolicyPageId) => void;
 }
 
@@ -92,18 +96,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Common Signup
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<'buyer' | 'seller'>('buyer');
-  const [stateName, setStateName] = useState(
-    initialCfg.country === 'Nigeria' ? 'Lagos' : initialCfg.country
-  );
+  const [stateName, setStateName] = useState(() => getStatesByCountry(initialCfg.country)[0] || initialCfg.country);
   const [campus, setCampus] = useState('');
   const [profilePic, setProfilePic] = useState('');
   const [agreedPolicies, setAgreedPolicies] = useState(false);
+
+  // Country-Based Verification Documents (dynamic per country)
+  const [idDocNumber, setIdDocNumber] = useState('');
+  const [businessRegNumber, setBusinessRegNumber] = useState('');
+  const [secondaryRegNumber, setSecondaryRegNumber] = useState('');
 
   // Student-specific
   const [instSearch, setInstSearch] = useState('');
   const [institution, setInstitution] = useState(() => {
     const list = getInstitutionsByCountry(initialCfg.country);
-    return list[0]?.name || 'University of Lagos (UNILAG)';
+    return list[0]?.name || `${initialCfg.country} Campus`;
   });
   const [level, setLevel] = useState('200 Level');
   const [schoolIdPhoto, setSchoolIdPhoto] = useState('');
@@ -127,7 +134,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [compressingImage, setCompressingImage] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (open) {
+      setMode(initialMode);
+      setError('');
+      const targetCountry = country === 'All' ? 'Nigeria' : country;
+      const cfg = getCountryConfig(targetCountry);
+      setSignupCountry(cfg.country);
+      setCountryCode(cfg.dialCode);
+      setSignupLanguage(
+        cfg.languages.includes(language) ? language : cfg.languages[0] || 'English'
+      );
+      const states = getStatesByCountry(cfg.country);
+      setStateName(states[0] || cfg.country);
+      const countryInsts = getInstitutionsByCountry(cfg.country);
+      setInstitution(countryInsts[0]?.name || `${cfg.country} Main Campus`);
+    }
+  }, [open, initialMode]);
+
   const activeSignupCountryCfg = getCountryConfig(signupCountry);
+  const docCfg = useMemo(() => getCountryDocumentRequirement(signupCountry), [signupCountry]);
+  const availableStates = useMemo(() => getStatesByCountry(signupCountry), [signupCountry]);
+  const countryMarkets = useMemo(() => {
+    const groups = getMarketsByCountry(signupCountry);
+    const list = groups.flatMap((g) => g.markets);
+    return list.length > 0 ? list : ALL_MARKET_NAMES;
+  }, [signupCountry]);
 
   const isSellerSignup =
     accountType === 'trader' ||
@@ -137,11 +169,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const filteredInstitutions = useMemo(() => {
     const q = instSearch.trim().toLowerCase();
     const countryList = getInstitutionsByCountry(signupCountry);
-    const baseList = q
-      ? NIGERIAN_INSTITUTIONS
-      : countryList.length > 0
-      ? countryList
-      : NIGERIAN_INSTITUTIONS;
+    const baseList = countryList.length > 0 ? countryList : NIGERIAN_INSTITUTIONS;
     if (!q) return baseList;
     return baseList.filter(
       (i) =>
@@ -212,12 +240,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const defaultLang = cfg.languages[0] || 'English';
     setSignupLanguage(defaultLang);
     setCountryAndLanguage(cfg.country, defaultLang, true);
+    // Reset country-specific documents and locations when switching country
+    setIdDocNumber('');
+    setBusinessRegNumber('');
+    setSecondaryRegNumber('');
+    setMarket('');
+    setCampus('');
+    const nextStates = getStatesByCountry(cfg.country);
     const countryInsts = getInstitutionsByCountry(cfg.country);
     if (countryInsts.length > 0) {
       setInstitution(countryInsts[0].name);
-      setStateName(countryInsts[0].state);
+      const matchedState = nextStates.find((s) =>
+        s.toLowerCase().includes(countryInsts[0].state.toLowerCase()) ||
+        countryInsts[0].state.toLowerCase().includes(s.toLowerCase())
+      );
+      setStateName(matchedState || nextStates[0] || countryInsts[0].state);
     } else {
-      setStateName(cfg.country);
+      setInstitution(`${cfg.country} Main Campus`);
+      setStateName(nextStates[0] || cfg.country);
     }
   };
 
@@ -236,7 +276,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         password,
         full_name: loginName.trim() || undefined,
       });
-      onSuccess(res.token, res.user);
+      onSuccess(res.token, res.user, false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed.');
     } finally {
@@ -274,6 +314,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           setError('Please enter your Shop Name and Market / Campus Location.');
           return;
         }
+        if (idDocNumber.trim().length < 5) {
+          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.idHint}`);
+          return;
+        }
+        if (businessRegNumber.trim().length < 4) {
+          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.businessHint}`);
+          return;
+        }
+        if (docCfg.secondaryBusinessLabel && secondaryRegNumber.trim().length < 5) {
+          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.secondaryBusinessHint}`);
+          return;
+        }
       } else if (accountType === 'service_provider') {
         if (!serviceCategory || !campus.trim() || !Number(priceFrom)) {
           setError(
@@ -281,8 +333,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           );
           return;
         }
+        if (idDocNumber.trim().length < 5) {
+          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.idHint}`);
+          return;
+        }
+        if (businessRegNumber.trim().length < 4) {
+          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.businessHint}`);
+          return;
+        }
+        if (docCfg.secondaryBusinessLabel && secondaryRegNumber.trim().length < 5) {
+          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.secondaryBusinessHint}`);
+          return;
+        }
       }
-      if (isSellerSignup && payoutAccountNumber.replace(/\D/g, '').length < 8) {
+      if (isSellerSignup && payoutAccountNumber.replace(/\D/g, '').length < 6) {
         setError('Please enter your Bank Account Number for Paystack Payouts.');
         return;
       }
@@ -304,8 +368,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLoading(true);
     try {
       const res = await api.signup({
-        full_name: fullName,
-        phone_number: phone,
+        full_name: fullName.trim(),
+        phone_number: phone.trim(),
         country_code: countryCode,
         country: signupCountry,
         language: signupLanguage,
@@ -315,22 +379,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         institution: accountType === 'student' ? institution : market || campus,
         level: accountType === 'student' ? level : undefined,
         school_id_photo: accountType === 'student' ? schoolIdPhoto : undefined,
-        shop_name: accountType === 'trader' ? shopName : undefined,
-        market: accountType === 'trader' ? market : undefined,
-        shop_doc_photo: accountType === 'trader' ? shopDocPhoto : undefined,
+        shop_name: accountType === 'trader' ? shopName.trim() : undefined,
+        market: accountType === 'trader' ? market.trim() : undefined,
+        shop_doc_photo:
+          accountType === 'trader' || accountType === 'service_provider' ? shopDocPhoto : undefined,
         service_category: accountType === 'service_provider' ? serviceCategory : undefined,
         price_from: accountType === 'service_provider' ? Number(priceFrom) : undefined,
         work_photos: accountType === 'service_provider' ? workPhotos : undefined,
-        state: stateName,
-        campus: campus || market || 'Main Campus',
+        state: stateName || availableStates[0] || signupCountry,
+        campus: campus.trim() || market.trim() || 'Main Campus',
         profile_pic: profilePic,
         agreed_policies: agreedPolicies,
         payout_bank_name: isSellerSignup ? payoutBankName : undefined,
         payout_account_number: isSellerSignup ? payoutAccountNumber : undefined,
-        payout_account_name: isSellerSignup ? payoutAccountName || fullName : undefined,
+        payout_account_name: isSellerSignup ? payoutAccountName || fullName.trim() : undefined,
+        id_doc_type: docCfg.idLabel,
+        id_doc_number: idDocNumber.trim() || undefined,
+        business_reg_type: docCfg.businessLabel,
+        business_reg_number: businessRegNumber.trim() || undefined,
+        secondary_reg_number: secondaryRegNumber.trim() || undefined,
       });
       setCountryAndLanguage(signupCountry, signupLanguage, true);
-      onSuccess(res.token, res.user);
+      onSuccess(res.token, res.user, true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Signup failed.');
     } finally {
@@ -738,7 +808,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           </span>
                         </div>
                         <p className="text-xs text-slate-600 mt-0.5">
-                          Shop Name, Market &amp; Shop photo / NIN / CAC
+                          Shop Name, Market &amp; {docCfg.idLabel.split('(')[0].trim()} / {docCfg.businessLabel.split('(')[0].trim()}
                         </p>
                       </div>
                     </button>
@@ -765,7 +835,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           </span>
                         </div>
                         <p className="text-xs text-slate-600 mt-0.5">
-                          Category, Work photos, Price From &amp; Location
+                          Category, {docCfg.idLabel.split('(')[0].trim()}, Price From &amp; Location
                         </p>
                       </div>
                     </button>
@@ -775,7 +845,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <>
                       <div>
                         <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Search School Name
+                          Search School Name ({getCountryDisplayName(signupCountry)})
                         </label>
                         <div className="relative mb-2">
                           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -786,8 +856,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                               const nextQuery = e.target.value;
                               setInstSearch(nextQuery);
                               const q = nextQuery.trim().toLowerCase();
+                              const baseList = getInstitutionsByCountry(signupCountry);
+                              const list = baseList.length > 0 ? baseList : NIGERIAN_INSTITUTIONS;
                               const matches = q
-                                ? NIGERIAN_INSTITUTIONS.filter(
+                                ? list.filter(
                                     (i) =>
                                       i.name.toLowerCase().includes(q) ||
                                       i.shortName.toLowerCase().includes(q) ||
@@ -795,13 +867,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                                       (i.country || '').toLowerCase().includes(q) ||
                                       i.type.toLowerCase().includes(q)
                                   )
-                                : NIGERIAN_INSTITUTIONS;
+                                : list;
                               if (matches.length > 0 && !matches.some((m) => m.name === institution)) {
                                 setInstitution(matches[0].name);
-                                setStateName(matches[0].state);
+                                const matchedState = availableStates.find((s) =>
+                                  s.toLowerCase().includes(matches[0].state.toLowerCase()) ||
+                                  matches[0].state.toLowerCase().includes(s.toLowerCase())
+                                );
+                                setStateName(matchedState || availableStates[0] || matches[0].state);
                               }
                             }}
-                            placeholder="Type UNILAG, KNUST, Legon, UCT, Wits, Lomé, Ghana..."
+                            placeholder="Search university / college in your country..."
                             className="w-full min-h-[44px] rounded-xl border border-slate-300 pl-10 pr-4 text-sm focus:border-blue-600 focus:outline-none"
                           />
                         </div>
@@ -811,8 +887,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-blue-600 focus:outline-none"
                         >
                           {filteredInstitutions.length === 0 ? (
-                            <option value="" disabled>
-                              No matching school found — clear search
+                            <option value={`${signupCountry} Campus`}>
+                              {signupCountry} Campus / School
                             </option>
                           ) : (
                             filteredInstitutions.map((inst) => (
@@ -846,11 +922,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             State / Region
                           </label>
                           <select
-                            value={stateName}
+                            value={availableStates.includes(stateName) ? stateName : availableStates[0]}
                             onChange={(e) => setStateName(e.target.value)}
                             className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-blue-600 focus:outline-none"
                           >
-                            {NIGERIAN_STATES.map((st) => (
+                            {availableStates.map((st) => (
                               <option key={st} value={st}>
                                 {st}
                               </option>
@@ -861,15 +937,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                       <div>
                         <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Campus / Hostel Area
+                          Campus / Hostel Area *
                         </label>
                         <input
                           type="text"
                           required
                           value={campus}
                           onChange={(e) => setCampus(e.target.value)}
-                          placeholder="e.g. Moremi Hall, Main Campus"
+                          placeholder="e.g. Main Campus / Hostel Block"
                           className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-blue-600 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-800 mb-1">
+                          {docCfg.idLabel} (Optional for faster verification)
+                        </label>
+                        <input
+                          type="text"
+                          value={idDocNumber}
+                          onChange={(e) => setIdDocNumber(e.target.value)}
+                          placeholder={docCfg.idPlaceholder}
+                          className="w-full min-h-[46px] rounded-xl border border-slate-300 px-3.5 text-sm focus:border-blue-600 focus:outline-none"
                         />
                       </div>
 
@@ -938,7 +1027,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <>
                       <div>
                         <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Shop Name
+                          Shop Name *
                         </label>
                         <input
                           type="text"
@@ -952,7 +1041,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                       <div>
                         <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Market / Plaza / Campus Gate
+                          Market / Plaza / Campus Gate ({getCountryDisplayName(signupCountry)}) *
                         </label>
                         <input
                           type="text"
@@ -963,11 +1052,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             setMarket(e.target.value);
                             setCampus(e.target.value);
                           }}
-                          placeholder="e.g. Wuse Market, Balogun Market, Computer Village Ikeja"
+                          placeholder={`e.g. ${countryMarkets[0] || 'Central Market'}`}
                           className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-orange-500 focus:outline-none"
                         />
                         <datalist id="afri-markets-list-auth">
-                          {ALL_MARKET_NAMES.map((m) => (
+                          {countryMarkets.map((m) => (
                             <option key={m} value={m} />
                           ))}
                         </datalist>
@@ -975,19 +1064,73 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                       <div>
                         <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          State
+                          State / Region
                         </label>
                         <select
-                          value={stateName}
+                          value={availableStates.includes(stateName) ? stateName : availableStates[0]}
                           onChange={(e) => setStateName(e.target.value)}
                           className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-orange-500 focus:outline-none"
                         >
-                          {NIGERIAN_STATES.map((st) => (
+                          {availableStates.map((st) => (
                             <option key={st} value={st}>
                               {st}
                             </option>
                           ))}
                         </select>
+                      </div>
+
+                      {/* Dynamic Country-Based Verification Documents */}
+                      <div className="rounded-xl border-2 border-orange-300 bg-orange-50/70 p-3.5 space-y-3">
+                        <div className="flex items-center gap-2 text-xs font-extrabold text-orange-950">
+                          <FileCheck2 className="w-4 h-4 text-orange-600 shrink-0" />
+                          <span>
+                            {activeSignupCountryCfg.flag} {getCountryDisplayName(signupCountry)} Verification Documents (Required)
+                          </span>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-900 mb-1">
+                            {docCfg.idLabel} *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={idDocNumber}
+                            onChange={(e) => setIdDocNumber(e.target.value)}
+                            placeholder={docCfg.idPlaceholder}
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-orange-500 focus:outline-none"
+                          />
+                          <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.idHint}</p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-900 mb-1">
+                            {docCfg.businessLabel} *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={businessRegNumber}
+                            onChange={(e) => setBusinessRegNumber(e.target.value)}
+                            placeholder={docCfg.businessPlaceholder}
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-orange-500 focus:outline-none"
+                          />
+                          <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.businessHint}</p>
+                        </div>
+                        {docCfg.secondaryBusinessLabel && (
+                          <div>
+                            <label className="block text-xs font-bold text-slate-900 mb-1">
+                              {docCfg.secondaryBusinessLabel} *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={secondaryRegNumber}
+                              onChange={(e) => setSecondaryRegNumber(e.target.value)}
+                              placeholder={docCfg.secondaryBusinessPlaceholder}
+                              className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-orange-500 focus:outline-none"
+                            />
+                            <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.secondaryBusinessHint}</p>
+                          </div>
+                        )}
                       </div>
 
                       <div className="rounded-xl border border-orange-200 bg-orange-50/70 p-3.5 flex items-center gap-3.5">
@@ -1000,14 +1143,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-bold text-slate-900">
-                            Shop Photo / NIN / CAC
+                            {docCfg.docPhotoLabel}
                           </p>
                           <p className="text-xs text-slate-600">
                             For your ORANGE Verified Trader badge.
                           </p>
                           <label className="mt-2 inline-flex items-center gap-1.5 min-h-[38px] px-3 rounded-lg bg-orange-500 text-white text-xs font-bold cursor-pointer hover:bg-orange-600">
                             <Camera className="w-4 h-4" />
-                            <span>{shopDocPhoto ? 'Change Photo' : 'Upload Shop / ID'}</span>
+                            <span>{shopDocPhoto ? 'Change Photo' : 'Upload Doc / Shop Photo'}</span>
                             <input
                               type="file"
                               accept="image/*"
@@ -1042,11 +1185,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                            Price From ({activeSignupCountryCfg.currencySymbol})
+                            Price From ({activeSignupCountryCfg.currencySymbol.trim()})
                           </label>
                           <input
                             type="number"
-                            min={100}
+                            min={10}
                             required
                             value={priceFrom}
                             onChange={(e) => setPriceFrom(e.target.value)}
@@ -1056,14 +1199,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </div>
                         <div>
                           <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                            State
+                            State / Region
                           </label>
                           <select
-                            value={stateName}
+                            value={availableStates.includes(stateName) ? stateName : availableStates[0]}
                             onChange={(e) => setStateName(e.target.value)}
                             className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-green-700 focus:outline-none"
                           >
-                            {NIGERIAN_STATES.map((st) => (
+                            {availableStates.map((st) => (
                               <option key={st} value={st}>
                                 {st}
                               </option>
@@ -1074,16 +1217,88 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                       <div>
                         <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Service Location / Campus Area
+                          Service City / Market / Campus Area *
                         </label>
                         <input
                           type="text"
                           required
+                          list="afri-markets-list-auth"
                           value={campus}
                           onChange={(e) => setCampus(e.target.value)}
-                          placeholder="e.g. Akoka / Yaba / Campus Gate"
+                          placeholder={`e.g. ${countryMarkets[0] || 'City / Campus Area'}`}
                           className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none"
                         />
+                        <datalist id="afri-markets-list-auth">
+                          {countryMarkets.map((m) => (
+                            <option key={m} value={m} />
+                          ))}
+                        </datalist>
+                      </div>
+
+                      {/* Dynamic Country-Based Verification Documents */}
+                      <div className="rounded-xl border-2 border-green-300 bg-green-50/70 p-3.5 space-y-3">
+                        <div className="flex items-center gap-2 text-xs font-extrabold text-green-950">
+                          <FileCheck2 className="w-4 h-4 text-green-700 shrink-0" />
+                          <span>
+                            {activeSignupCountryCfg.flag} {getCountryDisplayName(signupCountry)} Verification Documents (Required)
+                          </span>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-900 mb-1">
+                            {docCfg.idLabel} *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={idDocNumber}
+                            onChange={(e) => setIdDocNumber(e.target.value)}
+                            placeholder={docCfg.idPlaceholder}
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-green-700 focus:outline-none"
+                          />
+                          <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.idHint}</p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-900 mb-1">
+                            {docCfg.businessLabel} *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={businessRegNumber}
+                            onChange={(e) => setBusinessRegNumber(e.target.value)}
+                            placeholder={docCfg.businessPlaceholder}
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-green-700 focus:outline-none"
+                          />
+                          <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.businessHint}</p>
+                        </div>
+                        {docCfg.secondaryBusinessLabel && (
+                          <div>
+                            <label className="block text-xs font-bold text-slate-900 mb-1">
+                              {docCfg.secondaryBusinessLabel} *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={secondaryRegNumber}
+                              onChange={(e) => setSecondaryRegNumber(e.target.value)}
+                              placeholder={docCfg.secondaryBusinessPlaceholder}
+                              className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-green-700 focus:outline-none"
+                            />
+                            <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.secondaryBusinessHint}</p>
+                          </div>
+                        )}
+                        <label className="inline-flex items-center gap-1.5 min-h-[38px] px-3 rounded-lg bg-green-700 text-white text-xs font-bold cursor-pointer hover:bg-green-800">
+                          <Camera className="w-4 h-4" />
+                          <span>
+                            {shopDocPhoto ? 'ID / Reg Photo Uploaded ✓' : `Upload ${docCfg.idLabel.split('(')[0].trim()} Photo`}
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleSingleImageUpload(e, setShopDocPhoto)}
+                            className="hidden"
+                          />
+                        </label>
                       </div>
 
                       <div>

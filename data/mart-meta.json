@@ -184,6 +184,20 @@
       "payout_bank_name": "Access Bank",
       "payout_account_number": "0123456789",
       "payout_account_name": "Ama Test Seller"
+    },
+    "234801608091": {
+      "country_code": "+234",
+      "country": "Nigeria",
+      "language": "English",
+      "badges": [
+        "student"
+      ],
+      "level": "300 Level",
+      "shop_photo": "",
+      "shop_rating": 5,
+      "shop_sales": 0,
+      "shop_featured": false,
+      "work_photos": []
     }
   },
   "blocked_users": {

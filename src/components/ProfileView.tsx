@@ -5,6 +5,8 @@ import {
   Camera,
   Check,
   CheckCircle2,
+  FileCheck2,
+  GraduationCap,
   Heart,
   LogOut,
   PackageCheck,
@@ -18,9 +20,11 @@ import {
   Trash2,
   Truck,
   User,
+  Wrench,
   X,
 } from 'lucide-react';
 import { Globe } from 'lucide-react';
+import { getCountryDocumentRequirement } from '../data/countryDocuments';
 import { NIGERIAN_INSTITUTIONS } from '../data/institutions';
 import {
   COUNTRY_LANGUAGE_CONFIGS,
@@ -44,6 +48,7 @@ import {
   WantAlert,
 } from '../types';
 import { BadgeRow } from './BadgePill';
+import type { NavTab } from './BottomNav';
 import { PaystackFeeModal, PaystackFeeRequest } from './PaystackFeeModal';
 
 const OWNER_PHONE = '07089628626';
@@ -57,6 +62,7 @@ interface ProfileViewProps {
   onUserUpdated: (user: PublicUser) => void;
   onLogout: () => void;
   onOpenOwnerDashboard: () => void;
+  onNavigateTab?: (tab: NavTab) => void;
   onViewItem: (item: MarketplaceItem) => void;
   onNotice: (msg: string) => void;
 }
@@ -70,6 +76,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onUserUpdated,
   onLogout,
   onOpenOwnerDashboard,
+  onNavigateTab,
   onViewItem,
   onNotice,
 }) => {
@@ -193,6 +200,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   }
 
   const isOwner = user.role === 'owner' || user.phone_number === OWNER_PHONE;
+  const isTrader = user.badges?.includes('trader');
+  const isServiceProvider = user.badges?.includes('service_provider');
+  const isStudent = !isTrader && !isServiceProvider;
+  const userDocCfg = getCountryDocumentRequirement(user.country);
   const savedWishlistItems = allItems.filter((i) => wishlistIds.includes(i.id));
   const activeSettingsCountryCfg = getCountryConfig(settingsCountry);
 
@@ -464,6 +475,204 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           >
             Open Owner Dashboard
           </button>
+        </div>
+      )}
+
+      {/* ROLE-SPECIFIC DASHBOARD (Distinct for Student vs Trader vs Service Provider) */}
+      {isTrader && (
+        <div className="rounded-2xl border-2 border-orange-400 bg-orange-50/70 p-5 space-y-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center shrink-0">
+                <Store className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-900">
+                  Trader Shop Dashboard
+                </h2>
+                <p className="text-xs font-semibold text-orange-900">
+                  {user.shop_name || 'Your Market Shop'} · {user.market || user.campus} ({user.state})
+                </p>
+              </div>
+            </div>
+            <span className="rounded-lg bg-orange-500 px-2.5 py-1 text-[11px] font-extrabold text-white">
+              Verified Trader
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5 text-xs">
+            <div className="rounded-xl bg-white border border-orange-200 p-3">
+              <div className="text-slate-500 font-semibold">Shop Products</div>
+              <div className="text-lg font-extrabold text-slate-900 tabular-nums">{myItems.length}</div>
+            </div>
+            <div className="rounded-xl bg-white border border-orange-200 p-3">
+              <div className="text-slate-500 font-semibold">Released (93%)</div>
+              <div className="text-lg font-extrabold text-green-800 tabular-nums">
+                {formatMoney(sellerReleasedEarnings, user.country)}
+              </div>
+            </div>
+            <div className="rounded-xl bg-white border border-orange-200 p-3">
+              <div className="text-slate-500 font-semibold">Offers Received</div>
+              <div className="text-lg font-extrabold text-orange-700 tabular-nums">{offers.length}</div>
+            </div>
+          </div>
+
+          {onNavigateTab && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onNavigateTab('shop')}
+                className="min-h-[42px] px-4 rounded-xl bg-orange-500 text-white text-xs font-extrabold hover:bg-orange-600"
+              >
+                Open My Shop Storefront
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('post')}
+                className="min-h-[42px] px-4 rounded-xl bg-green-700 text-white text-xs font-extrabold hover:bg-green-800"
+              >
+                + Post Shop Product
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('chat')}
+                className="min-h-[42px] px-4 rounded-xl border border-orange-300 bg-white text-orange-900 text-xs font-extrabold hover:bg-orange-50"
+              >
+                Buyer Chats
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isServiceProvider && (
+        <div className="rounded-2xl border-2 border-green-600 bg-green-50/70 p-5 space-y-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-green-700 text-white flex items-center justify-center shrink-0">
+                <Wrench className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-900">
+                  Service Provider Dashboard
+                </h2>
+                <p className="text-xs font-semibold text-green-900">
+                  {user.service_category || 'Campus Service'} · From{' '}
+                  {formatMoney(user.price_from || 2000, user.country)} · {user.campus}
+                </p>
+              </div>
+            </div>
+            <span className="rounded-lg bg-green-700 px-2.5 py-1 text-[11px] font-extrabold text-white">
+              Verified Provider
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5 text-xs">
+            <div className="rounded-xl bg-white border border-green-200 p-3">
+              <div className="text-slate-500 font-semibold">Bookings</div>
+              <div className="text-lg font-extrabold text-slate-900 tabular-nums">{bookings.length}</div>
+            </div>
+            <div className="rounded-xl bg-white border border-green-200 p-3">
+              <div className="text-slate-500 font-semibold">Listings</div>
+              <div className="text-lg font-extrabold text-green-800 tabular-nums">{myItems.length}</div>
+            </div>
+            <div className="rounded-xl bg-white border border-green-200 p-3">
+              <div className="text-slate-500 font-semibold">Trust Rating</div>
+              <div className="text-lg font-extrabold text-amber-600 tabular-nums">
+                ★ {(user.trust_score || 5.0).toFixed(1)}
+              </div>
+            </div>
+          </div>
+
+          {onNavigateTab && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onNavigateTab('services')}
+                className="min-h-[42px] px-4 rounded-xl bg-green-700 text-white text-xs font-extrabold hover:bg-green-800"
+              >
+                Manage My Services
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('post')}
+                className="min-h-[42px] px-4 rounded-xl border border-green-700 bg-white text-green-900 text-xs font-extrabold hover:bg-green-50"
+              >
+                + Post Item / Portfolio
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('chat')}
+                className="min-h-[42px] px-4 rounded-xl border border-green-700 bg-white text-green-900 text-xs font-extrabold hover:bg-green-50"
+              >
+                Client Inquiries
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isStudent && !isOwner && (
+        <div className="rounded-2xl border-2 border-blue-500 bg-blue-50/70 p-5 space-y-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                <GraduationCap className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-900">
+                  Student Campus Dashboard
+                </h2>
+                <p className="text-xs font-semibold text-blue-900">
+                  {user.institution} · {user.level || 'Student'} · {user.campus}
+                </p>
+              </div>
+            </div>
+            <span className="rounded-lg bg-blue-600 px-2.5 py-1 text-[11px] font-extrabold text-white">
+              Verified Student
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5 text-xs">
+            <div className="rounded-xl bg-white border border-blue-200 p-3">
+              <div className="text-slate-500 font-semibold">Escrow Orders</div>
+              <div className="text-lg font-extrabold text-slate-900 tabular-nums">{buyerOrders.length}</div>
+            </div>
+            <div className="rounded-xl bg-white border border-blue-200 p-3">
+              <div className="text-slate-500 font-semibold">Saved Wishlist</div>
+              <div className="text-lg font-extrabold text-blue-700 tabular-nums">{savedWishlistItems.length}</div>
+            </div>
+            <div className="rounded-xl bg-white border border-blue-200 p-3">
+              <div className="text-slate-500 font-semibold">Campus Listings</div>
+              <div className="text-lg font-extrabold text-green-800 tabular-nums">{myItems.length}</div>
+            </div>
+          </div>
+
+          {onNavigateTab && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onNavigateTab('home')}
+                className="min-h-[42px] px-4 rounded-xl bg-blue-600 text-white text-xs font-extrabold hover:bg-blue-700"
+              >
+                Browse Campus Feed
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('post')}
+                className="min-h-[42px] px-4 rounded-xl bg-green-700 text-white text-xs font-extrabold hover:bg-green-800"
+              >
+                + Sell Campus Item
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('markets')}
+                className="min-h-[42px] px-4 rounded-xl border border-blue-300 bg-white text-blue-900 text-xs font-extrabold hover:bg-blue-50"
+              >
+                Explore Markets
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -870,6 +1079,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 {user.country_code || '+234'} {user.phone_number}
               </span>
             </p>
+            {(user.id_doc_number || user.business_reg_number) && (
+              <div className="mt-1.5 inline-flex flex-wrap items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-2.5 py-1 text-[11px] text-green-950">
+                <FileCheck2 className="w-3.5 h-3.5 text-green-700 shrink-0" />
+                {user.id_doc_number && (
+                  <span>
+                    <strong>{user.id_doc_type || userDocCfg.idLabel}:</strong> {user.id_doc_number}
+                  </span>
+                )}
+                {user.business_reg_number && (
+                  <span>
+                    · <strong>{user.business_reg_type || userDocCfg.businessLabel}:</strong>{' '}
+                    {user.business_reg_number}
+                  </span>
+                )}
+                {user.secondary_reg_number && (
+                  <span>· <strong>IFU:</strong> {user.secondary_reg_number}</span>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -957,10 +1185,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </select>
                 <input
                   type="number"
-                  min={100}
+                  min={10}
                   value={priceFrom}
                   onChange={(e) => setPriceFrom(e.target.value)}
-                  placeholder="Price From ₦"
+                  placeholder={`Price From ${activeSettingsCountryCfg.currencySymbol.trim()}`}
                   className="min-h-[42px] rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold tabular-nums"
                 />
               </div>

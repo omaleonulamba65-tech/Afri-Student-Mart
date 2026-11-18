@@ -1,10 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { Check, Globe2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Check, Globe2, MapPin, X } from 'lucide-react';
+import { getStatesByCountry } from '../data/countryDocuments';
+import { getInstitutionsByCountry } from '../data/institutions';
 import {
   COUNTRY_LANGUAGE_CONFIGS,
   getCountryConfig,
   getCountryDisplayName,
 } from '../data/languages';
+import { getMarketsByCountry } from '../data/markets';
 import { useI18n } from '../lib/i18nContext';
 import { api } from '../lib/api';
 import type { PublicUser } from '../types';
@@ -13,6 +16,9 @@ interface LanguagePickerModalProps {
   open: boolean;
   canClose: boolean;
   user?: PublicUser | null;
+  initialState?: string;
+  initialArea?: string;
+  onLocationSelected?: (loc: { country: string; state: string; area: string }) => void;
   onUserUpdated?: (user: PublicUser) => void;
   onClose: () => void;
 }
@@ -21,6 +27,9 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
   open,
   canClose,
   user,
+  initialState = 'All',
+  initialArea = 'All',
+  onLocationSelected,
   onUserUpdated,
   onClose,
 }) => {
@@ -28,16 +37,52 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
   const [selectedCountry, setSelectedCountry] = useState<string>(
     country === 'All' ? 'Nigeria' : country
   );
+  const [selectedState, setSelectedState] = useState<string>(initialState || 'All');
+  const [selectedArea, setSelectedArea] = useState<string>(initialArea || 'All');
   const [selectedLanguage, setSelectedLanguage] = useState<string>(language || 'English');
   const [viewAllCountries, setViewAllCountries] = useState<boolean>(country === 'All');
 
   useEffect(() => {
     if (open) {
       setSelectedCountry(country === 'All' ? 'Nigeria' : country);
+      setSelectedState(initialState || 'All');
+      setSelectedArea(initialArea || 'All');
       setSelectedLanguage(language || 'English');
       setViewAllCountries(country === 'All');
     }
-  }, [open, country, language]);
+  }, [open, country, language, initialState, initialArea]);
+
+  const availableStates = useMemo(
+    () => getStatesByCountry(selectedCountry),
+    [selectedCountry]
+  );
+
+  const availableAreas = useMemo(() => {
+    const instNames = getInstitutionsByCountry(selectedCountry)
+      .filter((inst) => {
+        if (!selectedState || selectedState === 'All') return true;
+        const stLower = selectedState.toLowerCase();
+        return (
+          stLower.includes(inst.state.toLowerCase()) ||
+          inst.state.toLowerCase().includes(stLower)
+        );
+      })
+      .map((i) => i.name);
+
+    const marketNames = getMarketsByCountry(selectedCountry)
+      .filter((grp) => {
+        if (!selectedState || selectedState === 'All') return true;
+        const stLower = selectedState.toLowerCase();
+        return (
+          stLower.includes(grp.stateOrCity.toLowerCase()) ||
+          grp.stateOrCity.toLowerCase().includes(stLower) ||
+          grp.country.toLowerCase() === grp.stateOrCity.toLowerCase()
+        );
+      })
+      .flatMap((g) => g.markets);
+
+    return Array.from(new Set([...instNames, ...marketNames]));
+  }, [selectedCountry, selectedState]);
 
   if (!open) return null;
 
@@ -46,6 +91,8 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
   const handleSelectCountry = (countryName: string) => {
     setSelectedCountry(countryName);
     setViewAllCountries(false);
+    setSelectedState('All');
+    setSelectedArea('All');
     const cfg = getCountryConfig(countryName);
     if (!cfg.languages.includes(selectedLanguage)) {
       setSelectedLanguage(cfg.languages[0] || 'English');
@@ -53,15 +100,22 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
   };
 
   const handleConfirm = async () => {
+    const finalCountry = viewAllCountries ? 'All' : selectedCountry;
     setCountryAndLanguage(selectedCountry, selectedLanguage, true);
     if (viewAllCountries) {
       setCountryOnly('All');
     }
+    onLocationSelected?.({
+      country: finalCountry,
+      state: viewAllCountries ? 'All' : selectedState,
+      area: viewAllCountries ? 'All' : selectedArea,
+    });
     if (user) {
       try {
         const res = await api.updateProfile({
           country: selectedCountry,
           language: selectedLanguage,
+          ...(selectedState && selectedState !== 'All' ? { state: selectedState } : {}),
         });
         onUserUpdated?.(res.user);
       } catch {
@@ -82,7 +136,9 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
             </div>
             <div className="min-w-0">
               <h2 className="text-base font-extrabold truncate">{t('pick_lang_title')}</h2>
-              <p className="text-xs text-green-100 truncate">{t('pick_lang_sub')}</p>
+              <p className="text-xs text-green-100 truncate">
+                Pick Country &rarr; State/Region &rarr; City/Campus/Market first
+              </p>
             </div>
           </div>
           {canClose && (
@@ -118,7 +174,7 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {COUNTRY_LANGUAGE_CONFIGS.map((cfg) => {
-                const active = selectedCountry === cfg.country;
+                const active = !viewAllCountries && selectedCountry === cfg.country;
                 const display = getCountryDisplayName(cfg.country);
                 return (
                   <button
@@ -148,11 +204,65 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
             </div>
           </div>
 
-          {/* 2. ALL Languages for selected country - NEVER hide small ones */}
+          {/* 2. Pick State/Region then City/Campus/Market */}
+          {!viewAllCountries && (
+            <div className="rounded-2xl border border-green-200 bg-green-50/50 p-3.5 space-y-3">
+              <div className="flex items-center gap-2 text-sm font-extrabold text-green-950">
+                <MapPin className="w-4 h-4 text-green-700 shrink-0" />
+                <span>
+                  2. State/Region &rarr; City / Campus / Market ({getCountryDisplayName(selectedCountry)})
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    State / Region
+                  </label>
+                  <select
+                    value={selectedState}
+                    onChange={(e) => {
+                      setSelectedState(e.target.value);
+                      setSelectedArea('All');
+                    }}
+                    className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900 focus:border-green-700 focus:outline-none"
+                  >
+                    <option value="All">All States / Regions in {getCountryDisplayName(selectedCountry)}</option>
+                    {availableStates.map((st) => (
+                      <option key={st} value={st}>
+                        {st}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    City / Campus / Market
+                  </label>
+                  <select
+                    value={selectedArea}
+                    onChange={(e) => setSelectedArea(e.target.value)}
+                    className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900 focus:border-green-700 focus:outline-none"
+                  >
+                    <option value="All">
+                      All Campuses &amp; Markets ({availableAreas.length})
+                    </option>
+                    {availableAreas.map((area) => (
+                      <option key={area} value={area}>
+                        {area}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 3. ALL Languages for selected country - NEVER hide small ones */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
               <label className="text-sm font-extrabold text-slate-900 inline-flex items-center gap-1.5">
-                <span>2. {t('language_label')} —</span>
+                <span>3. {t('language_label')} —</span>
                 <span className="text-xl leading-none" aria-hidden="true">
                   {activeConfig.flag}
                 </span>
@@ -204,7 +314,9 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
               </span>
             </span>{' '}
             <span>
-              · {selectedLanguage} · {activeConfig.currencySymbol.trim()}
+              {!viewAllCountries && selectedState !== 'All' ? `· ${selectedState}` : ''}
+              {!viewAllCountries && selectedArea !== 'All' ? ` · ${selectedArea}` : ''} · {selectedLanguage} ·{' '}
+              {activeConfig.currencySymbol.trim()}
             </span>
           </div>
           <button
@@ -219,3 +331,4 @@ export const LanguagePickerModal: React.FC<LanguagePickerModalProps> = ({
     </div>
   );
 };
+

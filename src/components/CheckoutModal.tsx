@@ -18,6 +18,7 @@ import { useI18n } from '../lib/i18nContext';
 import { launchPaystackInline, resolvePaystackConfig } from '../lib/paystack';
 import {
   AdSettings,
+  CartItem,
   EscrowOrder,
   MarketplaceItem,
   PolicyPageId,
@@ -27,6 +28,7 @@ import { RefundPolicyBox } from './RefundPolicyBox';
 
 interface CheckoutModalProps {
   item: MarketplaceItem | null;
+  cartItems?: CartItem[];
   user: PublicUser | null;
   adSettings?: Partial<AdSettings> | null;
   agreedPrice?: number;
@@ -34,10 +36,12 @@ interface CheckoutModalProps {
   onRequireAuth: () => void;
   onOpenPolicy: (id: PolicyPageId) => void;
   onOrderSuccess: (order: EscrowOrder) => void;
+  onCartCheckoutSuccess?: () => void;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   item,
+  cartItems,
   user,
   adSettings,
   agreedPrice,
@@ -45,6 +49,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onRequireAuth,
   onOpenPolicy,
   onOrderSuccess,
+  onCartCheckoutSuccess,
 }) => {
   const { country: activeCountry, formatMoney, t } = useI18n();
   const [deliveryTier, setDeliveryTier] = useState<'same_city' | 'standard'>('same_city');
@@ -62,13 +67,25 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [pendingRef, setPendingRef] = useState('');
   const [error, setError] = useState('');
   const [completedOrder, setCompletedOrder] = useState<EscrowOrder | null>(null);
+  const [completedCartCount, setCompletedCartCount] = useState(0);
 
-  if (!item) return null;
+  const effectiveEntries: CartItem[] =
+    cartItems && cartItems.length > 0
+      ? cartItems
+      : item
+      ? [{ item, quantity: 1 }]
+      : [];
 
-  const itemCountry = item.country || (activeCountry === 'All' ? 'Nigeria' : activeCountry);
+  if (effectiveEntries.length === 0) return null;
+
+  const isCartCheckout = Boolean(cartItems && cartItems.length > 0);
+  const primaryItem = effectiveEntries[0].item;
+  const itemCountry = primaryItem.country || (activeCountry === 'All' ? 'Nigeria' : activeCountry);
   const countryCfg = getCountryConfig(itemCountry);
   const cfg = resolvePaystackConfig(adSettings);
-  const productPrice = Number(agreedPrice || item.price);
+  const productPrice = isCartCheckout
+    ? effectiveEntries.reduce((sum, entry) => sum + Number(entry.item.price || 0) * entry.quantity, 0)
+    : Number(agreedPrice || primaryItem.price);
   const deliveryFee =
     deliveryTier === 'same_city' ? countryCfg.deliveryFeeSameCity : countryCfg.deliveryFeeStandard;
   const totalAmount = productPrice + deliveryFee;
@@ -76,22 +93,42 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const adminCommissionPreview = Math.round(productPrice * 0.07);
   const sellerPayoutPreview = productPrice - adminCommissionPreview;
   const adminTotalKeptPreview = adminCommissionPreview + deliveryFee;
-  const thumb = item.thumbnails?.[0] || item.photos?.[0] || '';
+  const thumb = primaryItem.thumbnails?.[0] || primaryItem.photos?.[0] || '';
 
   const finalizeOrder = async (reference: string) => {
     setProcessing(true);
     setError('');
     try {
-      const res = await api.createOrder({
-        item_id: item.id,
-        delivery_address: deliveryAddress.trim() || item.location,
-        paystack_reference: reference,
-        buyer_email: buyerEmail.trim(),
-        delivery_tier: deliveryTier,
-      });
-      setCompletedOrder(res.order);
-      setTestSheetOpen(false);
-      onOrderSuccess(res.order);
+      let lastOrder: EscrowOrder | null = null;
+      let createdCount = 0;
+      for (let i = 0; i < effectiveEntries.length; i++) {
+        const entry = effectiveEntries[i];
+        const qty = Math.max(1, entry.quantity);
+        for (let q = 0; q < qty; q++) {
+          const itemRef =
+            effectiveEntries.length === 1 && qty === 1
+              ? reference
+              : `${reference}_${i + 1}_${q + 1}`;
+          const res = await api.createOrder({
+            item_id: entry.item.id,
+            delivery_address: deliveryAddress.trim() || entry.item.location,
+            paystack_reference: itemRef,
+            buyer_email: buyerEmail.trim(),
+            delivery_tier: deliveryTier,
+          });
+          lastOrder = res.order;
+          createdCount += 1;
+        }
+      }
+      if (lastOrder) {
+        setCompletedOrder(lastOrder);
+        setCompletedCartCount(createdCount);
+        setTestSheetOpen(false);
+        onOrderSuccess(lastOrder);
+        if (isCartCheckout) {
+          onCartCheckoutSuccess?.();
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save your Paystack order.');
     } finally {
@@ -122,10 +159,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       amountNaira: totalAmount,
       currency: countryCfg.currencyCode,
       reference: ref,
-      sellerSubaccountCode: item.seller_subaccount_code,
+      sellerSubaccountCode: isCartCheckout ? undefined : primaryItem.seller_subaccount_code,
       metadata: {
         custom_fields: [
-          { display_name: 'Item', variable_name: 'item_title', value: item.title },
+          {
+            display_name: 'Items',
+            variable_name: 'item_title',
+            value: isCartCheckout
+              ? `${effectiveEntries.length} Cart Items (${primaryItem.title})`
+              : primaryItem.title,
+          },
           { display_name: 'Delivery Address', variable_name: 'delivery_address', value: deliveryAddress },
           { display_name: `Product Price (${countryCfg.currencyCode})`, variable_name: 'product_price', value: productPrice },
           { display_name: `Delivery Fee (${countryCfg.currencyCode})`, variable_name: 'delivery_fee', value: deliveryFee },
@@ -193,20 +236,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 <span className="font-mono font-bold text-slate-900">{completedOrder.reference}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-600">Item</span>
-                <span className="font-bold text-slate-900 truncate max-w-[60%]">{completedOrder.item_title}</span>
+                <span className="text-slate-600">Items Ordered</span>
+                <span className="font-bold text-slate-900 truncate max-w-[60%]">
+                  {completedCartCount > 1
+                    ? `${completedCartCount} Escrow Orders Created`
+                    : completedOrder.item_title}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-600">Total Paid via Paystack</span>
                 <span className="font-extrabold text-green-800 tabular-nums">
-                  {formatMoney(completedOrder.total_amount, completedOrder.country || itemCountry)}
+                  {formatMoney(totalAmount, completedOrder.country || itemCountry)}
                 </span>
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-slate-600">Split (7% + Delivery Fee / 93%)</span>
                 <span className="font-bold text-green-900 tabular-nums">
-                  Admin {formatMoney(completedOrder.admin_total_kept, completedOrder.country || itemCountry)} · Seller{' '}
-                  {formatMoney(completedOrder.seller_payout, completedOrder.country || itemCountry)}
+                  Admin {formatMoney(adminTotalKeptPreview, completedOrder.country || itemCountry)} · Seller{' '}
+                  {formatMoney(sellerPayoutPreview, completedOrder.country || itemCountry)}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -251,30 +298,65 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
             )}
 
-            {/* Item Summary */}
-            <div className="rounded-2xl border border-slate-200 p-3.5 flex items-center gap-3.5 bg-white">
-              <div className="w-16 h-16 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200">
-                {thumb ? (
-                  <img src={thumb} alt={item.title} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-slate-400">
-                    <Package className="w-6 h-6" />
-                  </div>
-                )}
+            {/* Item Summary (Single or Cart) */}
+            {isCartCheckout ? (
+              <div className="rounded-2xl border border-slate-200 p-3.5 space-y-2.5 bg-white">
+                <div className="text-xs font-extrabold uppercase text-green-800">
+                  Cart Checkout ({effectiveEntries.reduce((s, e) => s + e.quantity, 0)} items)
+                </div>
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {effectiveEntries.map(({ item: entryItem, quantity }) => {
+                    const entryThumb = entryItem.thumbnails?.[0] || entryItem.photos?.[0] || '';
+                    return (
+                      <div key={entryItem.id} className="flex items-center gap-3 text-xs">
+                        <div className="w-11 h-11 rounded-lg bg-slate-100 overflow-hidden shrink-0 border border-slate-200">
+                          {entryThumb ? (
+                            <img src={entryThumb} alt={entryItem.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-slate-400">
+                              <Package className="w-4 h-4" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-slate-900 truncate">{entryItem.title}</div>
+                          <div className="text-slate-500 truncate">
+                            Qty: {quantity} · {entryItem.seller_name}
+                          </div>
+                        </div>
+                        <div className="font-extrabold text-green-800 tabular-nums shrink-0">
+                          {formatMoney(entryItem.price * quantity, entryItem.country || itemCountry)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-sm sm:text-base font-extrabold text-slate-900 truncate">
-                  {item.title}
-                </h3>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Seller: <strong className="text-slate-800">{item.seller_name}</strong> ·{' '}
-                  {item.location}
-                </p>
-                <p className="text-sm font-extrabold text-green-800 tabular-nums mt-1">
-                  {formatMoney(productPrice, itemCountry)}
-                </p>
+            ) : (
+              <div className="rounded-2xl border border-slate-200 p-3.5 flex items-center gap-3.5 bg-white">
+                <div className="w-16 h-16 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200">
+                  {thumb ? (
+                    <img src={thumb} alt={primaryItem.title} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-400">
+                      <Package className="w-6 h-6" />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm sm:text-base font-extrabold text-slate-900 truncate">
+                    {primaryItem.title}
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    Seller: <strong className="text-slate-800">{primaryItem.seller_name}</strong> ·{' '}
+                    {primaryItem.location}
+                  </p>
+                  <p className="text-sm font-extrabold text-green-800 tabular-nums mt-1">
+                    {formatMoney(productPrice, itemCountry)}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Delivery Details + Same-City vs Standard Tier */}
             <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">

@@ -20,7 +20,7 @@ interface I18nContextValue {
   setCountryOnly: (country: string) => void;
   t: (key: TranslationKey) => string;
   translateCategory: (cat: string) => string;
-  formatMoney: (amount: number, overrideCountry?: string) => string;
+  formatMoney: (amount: number, overrideCountry?: string, includeCode?: boolean) => string;
 }
 
 const I18nContext = createContext<I18nContextValue | null>(null);
@@ -113,13 +113,14 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const formatMoney = useCallback(
-    (amount: number, overrideCountry?: string): string => {
+    (amount: number, overrideCountry?: string, includeCode = false): string => {
       const targetCountry = overrideCountry || (country === 'All' ? 'Nigeria' : country);
       const cfg =
         COUNTRY_LANGUAGE_CONFIGS.find(
           (c) => c.country.toLowerCase() === targetCountry.toLowerCase()
         ) || countryConfig;
-      return `${cfg.currencySymbol}${Number(amount || 0).toLocaleString('en-US')}`;
+      const base = `${cfg.currencySymbol}${Number(amount || 0).toLocaleString('en-US')}`;
+      return includeCode ? `${base} ${cfg.currencyCode}` : base;
     },
     [country, countryConfig]
   );

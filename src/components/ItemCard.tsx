@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Flag, Heart, MapPin, MessageCircle, Rocket, ShoppingBag, Star, Video } from 'lucide-react';
+import { Flag, Heart, MessageCircle, Rocket, ShoppingBag, ShoppingCart, Star, Video } from 'lucide-react';
 import {
   getCountryByDialCode,
   getCountryConfig,
@@ -17,6 +17,7 @@ interface ItemCardProps {
   onToggleWishlist?: (item: MarketplaceItem) => void;
   onViewDetails: (item: MarketplaceItem) => void;
   onBuyNow?: (item: MarketplaceItem) => void;
+  onAddToCart?: (item: MarketplaceItem) => void;
   onChat: (item: MarketplaceItem) => void;
   onReport: (item: MarketplaceItem) => void;
 }
@@ -28,6 +29,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
   onToggleWishlist,
   onViewDetails,
   onBuyNow,
+  onAddToCart,
   onChat,
   onReport,
 }) => {
@@ -188,12 +190,24 @@ export const ItemCard: React.FC<ItemCardProps> = ({
               <span>{t('buy_now')}</span>
             </button>
           )}
+          {onAddToCart && (
+            <button
+              type="button"
+              onClick={() => onAddToCart(item)}
+              title="Add to Cart"
+              aria-label={`Add ${item.title} to cart`}
+              className="min-h-[44px] px-2.5 rounded-xl border border-green-700 bg-green-50 text-green-900 font-bold text-xs flex items-center justify-center gap-1 hover:bg-green-100 whitespace-nowrap shrink-0"
+            >
+              <ShoppingCart className="w-3.5 h-3.5 shrink-0" />
+              <span>+ Cart</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onChat(item)}
             title="Chat for questions only. Pay on this site to stay safe."
             className={`${
-              onBuyNow ? 'px-3' : 'flex-1 px-3'
+              onBuyNow ? 'px-2.5' : 'flex-1 px-3'
             } min-h-[44px] rounded-xl border border-green-700 bg-white text-green-800 font-bold text-xs sm:text-sm flex items-center justify-center gap-1 hover:bg-green-50 whitespace-nowrap`}
           >
             <MessageCircle className="w-3.5 h-3.5 shrink-0" />

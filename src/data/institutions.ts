@@ -51,6 +51,7 @@ export const NIGERIAN_STATES = [
   'Gambia',
   'Cape Verde',
   'Guinea-Bissau',
+  'Cameroon',
   'South Africa',
 ] as const;
 
@@ -291,6 +292,13 @@ export const NIGERIAN_INSTITUTIONS: InstitutionOption[] = [
   { name: 'University of Abomey-Calavi', shortName: 'UAC Abomey-Calavi', type: 'University', state: 'Benin Republic', country: 'Benin' },
   { name: 'University of Parakou', shortName: 'UP Parakou', type: 'University', state: 'Benin Republic', country: 'Benin' },
   { name: 'National University of Agriculture', shortName: 'UNA Benin', type: 'University', state: 'Benin Republic', country: 'Benin' },
+
+  // Cameroon
+  { name: 'University of Yaoundé I', shortName: 'UY1 Yaoundé', type: 'University', state: 'Centre (Yaoundé)', country: 'Cameroon' },
+  { name: 'University of Douala', shortName: 'UD Douala', type: 'University', state: 'Littoral (Douala)', country: 'Cameroon' },
+  { name: 'University of Buea (UB)', shortName: 'UB Buea', type: 'University', state: 'South-West (Buea / Limbe)', country: 'Cameroon' },
+  { name: 'University of Dschang', shortName: 'UDs Dschang', type: 'University', state: 'West (Dschang / Bafoussam)', country: 'Cameroon' },
+  { name: 'University of Bamenda', shortName: 'UBa Bamenda', type: 'University', state: 'North-West (Bamenda)', country: 'Cameroon' },
 
   // Sierra Leone
   { name: 'Fourah Bay College, University of Sierra Leone', shortName: 'FBC USL', type: 'University', state: 'Sierra Leone', country: 'Sierra Leone' },

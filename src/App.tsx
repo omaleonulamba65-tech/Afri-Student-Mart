@@ -11,6 +11,7 @@ import {
   Search,
   ShieldCheck,
   Shirt,
+  ShoppingCart,
   Smartphone,
   Sofa,
   Sparkles,
@@ -28,12 +29,14 @@ import { ItemCard } from './components/ItemCard';
 import { LanguagePickerModal } from './components/LanguagePickerModal';
 import { BrandLogo } from './components/Logo';
 import heroCampusMarketImg from './assets/images/hero_campus_market_1794758659851.jpg';
+import { getStatesByCountry } from './data/countryDocuments';
 import { getInstitutionsByCountry } from './data/institutions';
 import {
   COUNTRY_LANGUAGE_CONFIGS,
   getCountryConfig,
   getCountryDisplayName,
 } from './data/languages';
+import { getMarketsByCountry } from './data/markets';
 import {
   api,
   getCachedItems,
@@ -46,6 +49,7 @@ import {
 import { useI18n } from './lib/i18nContext';
 import {
   AdSettings,
+  CartItem,
   HOME_QUICK_CATEGORIES,
   ITEM_CATEGORIES,
   ITEM_CONDITIONS,
@@ -61,6 +65,9 @@ import {
 // Code-split secondary views & modals so Home loads in <2 seconds even on 3G Android phones
 const AuthModal = lazy(() =>
   import('./components/AuthModal').then((m) => ({ default: m.AuthModal }))
+);
+const CartDrawer = lazy(() =>
+  import('./components/CartDrawer').then((m) => ({ default: m.CartDrawer }))
 );
 const CheckoutModal = lazy(() =>
   import('./components/CheckoutModal').then((m) => ({ default: m.CheckoutModal }))
@@ -155,6 +162,10 @@ const TabFallback = () => (
   <div className="py-12 text-center text-sm font-semibold text-slate-500">Loading...</div>
 );
 
+const OWNER_VIEW_KEY = 'afri_mart_owner_view';
+const CART_KEY = 'afri_mart_cart_v1';
+const SELECTED_STATE_KEY = 'afri_mart_selected_state';
+
 export default function App() {
   const {
     country,
@@ -168,7 +179,7 @@ export default function App() {
     formatMoney,
   } = useI18n();
 
-  const initialCache = useMemo(() => getCachedItems(), []);
+  const initialCache = useMemo(() => getCachedItems(country), []);
   const [user, setUser] = useState<PublicUser | null>(null);
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [showOwnerDashboard, setShowOwnerDashboard] = useState(false);
@@ -187,31 +198,94 @@ export default function App() {
   // Low Data / Offline Mode toggle
   const [lowDataMode, setLowDataMode] = useState<boolean>(() => getLowDataMode());
 
-  // Wishlist state
+  // Wishlist & Cart state
   const [wishlistIds, setWishlistIds] = useState<string[]>([]);
+  const [cartItems, setCartItems] = useState<CartItem[]>(() => {
+    try {
+      const raw = localStorage.getItem(CART_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as CartItem[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [cartOpen, setCartOpen] = useState(false);
+  const [cartCheckoutActive, setCartCheckoutActive] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CART_KEY, JSON.stringify(cartItems));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [cartItems]);
+
+  const cartCount = useMemo(
+    () => cartItems.reduce((sum, entry) => sum + entry.quantity, 0),
+    [cartItems]
+  );
 
   // Hot Deals Countdown Timer (resets daily 12pm noon)
   const [countdownSecs, setCountdownSecs] = useState<number>(getSecondsUntilNoon);
 
-  // Filters + Near Me / School / Market pill mode
+  // Filters + Near Me / State / School / Market pill mode
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedCondition, setSelectedCondition] = useState<string>('All');
+  const [selectedState, setSelectedState] = useState<string>(() => {
+    try {
+      return localStorage.getItem(SELECTED_STATE_KEY) || 'All';
+    } catch {
+      return 'All';
+    }
+  });
   const [selectedInstitution, setSelectedInstitution] = useState<string>('All');
   const [filterMode, setFilterMode] = useState<ItemFilterMode>('all');
 
-  const homeInstitutions = useMemo(() => getInstitutionsByCountry(country), [country]);
-
-  // Reset selectedInstitution to 'All' if user switches to a country where that school doesn't belong
   useEffect(() => {
+    try {
+      localStorage.setItem(SELECTED_STATE_KEY, selectedState);
+    } catch {
+      // Ignore storage errors
+    }
+  }, [selectedState]);
+
+  const homeStates = useMemo(() => getStatesByCountry(country), [country]);
+  const homeInstitutions = useMemo(() => getInstitutionsByCountry(country), [country]);
+  const homeMarkets = useMemo(
+    () => getMarketsByCountry(country).flatMap((grp) => grp.markets),
+    [country]
+  );
+
+  // Strict country isolation: clear stale items and reset state/area when country changes
+  const prevCountryRef = useRef(country);
+  useEffect(() => {
+    if (prevCountryRef.current !== country) {
+      prevCountryRef.current = country;
+      const countryCache = getCachedItems(country);
+      setItems(countryCache);
+      setHotDealItems([]);
+      setTotalItemsCount(countryCache.length);
+      setLoadingItems(countryCache.length === 0);
+      setPage(1);
+    }
+    if (
+      selectedState !== 'All' &&
+      (country === 'All' ||
+        !homeStates.some((st) => st.toLowerCase() === selectedState.toLowerCase()))
+    ) {
+      setSelectedState('All');
+    }
     if (
       selectedInstitution !== 'All' &&
-      !homeInstitutions.some((i) => i.name === selectedInstitution)
+      !homeInstitutions.some((i) => i.name === selectedInstitution) &&
+      !homeMarkets.some((m) => m === selectedInstitution)
     ) {
       setSelectedInstitution('All');
     }
-  }, [country, homeInstitutions, selectedInstitution]);
+  }, [country, homeStates, homeInstitutions, homeMarkets, selectedState, selectedInstitution]);
 
   // Quick "I Want This / Price Drop Alert" inputs on Home
   const [wantKeyword, setWantKeyword] = useState('');
@@ -275,7 +349,7 @@ export default function App() {
     async (targetPage: number, append: boolean) => {
       if (append) {
         setLoadingMore(true);
-      } else if (items.length === 0) {
+      } else if (getCachedItems(country).length === 0) {
         setLoadingItems(true);
       }
       try {
@@ -284,6 +358,7 @@ export default function App() {
           limit: 10,
           lite: true,
           country: country === 'All' ? undefined : country,
+          state: selectedState !== 'All' ? selectedState : undefined,
           search: debouncedSearch || undefined,
           category: selectedCategory,
           condition: selectedCondition,
@@ -310,10 +385,10 @@ export default function App() {
             selectedCategory === 'All' &&
             selectedCondition === 'All' &&
             selectedInstitution === 'All' &&
-            filterMode === 'all' &&
-            country === 'Nigeria'
+            selectedState === 'All' &&
+            filterMode === 'all'
           ) {
-            setCachedItems(next);
+            setCachedItems(next, country);
           }
           return next;
         });
@@ -327,6 +402,7 @@ export default function App() {
     },
     [
       country,
+      selectedState,
       debouncedSearch,
       selectedCategory,
       selectedCondition,
@@ -378,6 +454,13 @@ export default function App() {
         .then((res) => {
           if (res?.user) {
             setUser(res.user);
+            try {
+              if (res.user.role === 'owner' && localStorage.getItem(OWNER_VIEW_KEY) === '1') {
+                setShowOwnerDashboard(true);
+              }
+            } catch {
+              // Ignore
+            }
             refreshUnread();
             fetchWishlist();
           } else {
@@ -453,9 +536,33 @@ export default function App() {
   // Client-side instant filter over currently loaded/cached items (0ms responsiveness offline or typing)
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
+      if (country !== 'All' && (item.country || 'Nigeria').toLowerCase() !== country.toLowerCase()) {
+        return false;
+      }
+      if (selectedState !== 'All') {
+        const stLower = selectedState.toLowerCase();
+        const itemState = (item.state || '').toLowerCase();
+        const itemLoc = (item.location || '').toLowerCase();
+        const itemInst = (item.institution || '').toLowerCase();
+        if (
+          itemState !== stLower &&
+          !itemState.includes(stLower) &&
+          !itemLoc.includes(stLower) &&
+          !itemInst.includes(stLower)
+        ) {
+          return false;
+        }
+      }
       if (!matchesSmartCategory(item.category, selectedCategory)) return false;
       if (selectedCondition !== 'All' && item.condition !== selectedCondition) return false;
-      if (selectedInstitution !== 'All' && item.institution !== selectedInstitution) return false;
+      if (selectedInstitution !== 'All') {
+        const areaLower = selectedInstitution.toLowerCase();
+        const matchesArea =
+          item.institution === selectedInstitution ||
+          (item.location || '').toLowerCase().includes(areaLower) ||
+          (item.seller_market || '').toLowerCase().includes(areaLower);
+        if (!matchesArea) return false;
+      }
       if (search.trim()) {
         const q = search.trim().toLowerCase();
         const matches =
@@ -469,7 +576,15 @@ export default function App() {
       }
       return true;
     });
-  }, [items, selectedCategory, selectedCondition, selectedInstitution, search]);
+  }, [
+    items,
+    country,
+    selectedState,
+    selectedCategory,
+    selectedCondition,
+    selectedInstitution,
+    search,
+  ]);
 
   const userHomeSchool =
     user?.institution || (selectedInstitution !== 'All' ? selectedInstitution : '');
@@ -521,8 +636,44 @@ export default function App() {
       showToast('You cannot buy your own item.');
       return;
     }
+    setCartCheckoutActive(false);
     setDetailItem(null);
     setCheckoutItem(item);
+  };
+
+  const handleAddToCart = (item: MarketplaceItem) => {
+    if (user && item.seller_id === user.id) {
+      showToast('You cannot add your own item to cart.');
+      return;
+    }
+    setCartItems((prev) => {
+      const idx = prev.findIndex((entry) => entry.item.id === item.id);
+      if (idx >= 0) {
+        return prev.map((entry, i) =>
+          i === idx ? { ...entry, quantity: entry.quantity + 1 } : entry
+        );
+      }
+      return [{ item, quantity: 1 }, ...prev];
+    });
+    showToast(`Added "${item.title}" to Cart!`);
+  };
+
+  const handleUpdateCartQty = (itemId: string, delta: number) => {
+    setCartItems((prev) =>
+      prev
+        .map((entry) =>
+          entry.item.id === itemId ? { ...entry, quantity: entry.quantity + delta } : entry
+        )
+        .filter((entry) => entry.quantity > 0)
+    );
+  };
+
+  const handleRemoveCartItem = (itemId: string) => {
+    setCartItems((prev) => prev.filter((entry) => entry.item.id !== itemId));
+  };
+
+  const handleClearCart = () => {
+    setCartItems([]);
   };
 
   const handleToggleWishlist = async (item: MarketplaceItem) => {
@@ -673,6 +824,12 @@ export default function App() {
     setStoredToken(null);
     setUser(null);
     setShowOwnerDashboard(false);
+    setCartCheckoutActive(false);
+    try {
+      localStorage.removeItem(OWNER_VIEW_KEY);
+    } catch {
+      // Ignore
+    }
     setUnreadCount(0);
     setWishlistIds([]);
     setActiveChatTarget(null);
@@ -691,6 +848,7 @@ export default function App() {
           onToggleWishlist={handleToggleWishlist}
           onViewDetails={(it) => setDetailItem(it)}
           onBuyNow={handleBuyNow}
+          onAddToCart={handleAddToCart}
           onChat={(it) => handleOpenChat(it)}
           onReport={handleTriggerReport}
         />
@@ -819,6 +977,21 @@ export default function App() {
               </span>
             </button>
 
+            <button
+              type="button"
+              onClick={() => setCartOpen(true)}
+              aria-label="Open Cart"
+              className="relative min-h-[38px] px-2.5 sm:px-3 rounded-xl border border-green-700/30 bg-green-50 text-green-900 text-xs font-extrabold inline-flex items-center gap-1.5 hover:bg-green-100 whitespace-nowrap shrink-0"
+            >
+              <ShoppingCart className="w-4 h-4 text-green-700 shrink-0" />
+              <span className="hidden sm:inline">Cart</span>
+              {cartCount > 0 && (
+                <span className="rounded-full bg-orange-500 px-1.5 py-0.5 text-[11px] font-extrabold text-white tabular-nums leading-none">
+                  {cartCount}
+                </span>
+              )}
+            </button>
+
             {user ? (
               <button
                 type="button"
@@ -864,7 +1037,14 @@ export default function App() {
         {showOwnerDashboard ? (
           <Suspense fallback={<TabFallback />}>
             <OwnerDashboardView
-              onBack={() => setShowOwnerDashboard(false)}
+              onBack={() => {
+                setShowOwnerDashboard(false);
+                try {
+                  localStorage.removeItem(OWNER_VIEW_KEY);
+                } catch {
+                  // Ignore
+                }
+              }}
               onAdsUpdated={(s) => setAdSettings(s)}
             />
           </Suspense>
@@ -981,7 +1161,11 @@ export default function App() {
                     <select
                       aria-label={t('country_label')}
                       value={country}
-                      onChange={(e) => setCountryOnly(e.target.value)}
+                      onChange={(e) => {
+                        setCountryOnly(e.target.value);
+                        setSelectedState('All');
+                        setSelectedInstitution('All');
+                      }}
                       className="min-h-[38px] rounded-lg border border-slate-300 bg-slate-50 px-2.5 text-sm sm:text-base font-bold text-slate-800"
                     >
                       <option value="All">🌍 {t('all_countries')}</option>
@@ -1240,8 +1424,8 @@ export default function App() {
                   ))}
                 </section>
 
-                {/* Filter Controls */}
-                <section className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
+                {/* Filter Controls: Category, Condition, State/Region -> City/School/Market */}
+                <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
                   <div>
                     <label className="block text-xs font-bold text-slate-600 mb-1">
                       {t('label_category')}
@@ -1280,6 +1464,32 @@ export default function App() {
 
                   <div>
                     <label className="block text-xs font-bold text-slate-600 mb-1">
+                      State / Region
+                    </label>
+                    <select
+                      value={selectedState}
+                      onChange={(e) => {
+                        setSelectedState(e.target.value);
+                        setSelectedInstitution('All');
+                      }}
+                      disabled={country === 'All'}
+                      className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-900 focus:border-green-700 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+                    >
+                      <option value="All">
+                        {country === 'All'
+                          ? 'Pick Country First'
+                          : `All States in ${getCountryDisplayName(country)}`}
+                      </option>
+                      {homeStates.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">
                       {t('label_institution')}
                     </label>
                     <select
@@ -1288,13 +1498,25 @@ export default function App() {
                       className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-900 focus:border-green-700 focus:outline-none"
                     >
                       <option value="All">{t('all_schools_markets')}</option>
-                      {homeInstitutions.map((inst) => (
-                        <option key={inst.name} value={inst.name}>
-                          {inst.country ? `${getCountryConfig(inst.country).flag} ` : ''}
-                          {inst.name}
-                          {inst.country ? ` — ${getCountryDisplayName(inst.country)}` : ''}
-                        </option>
-                      ))}
+                      {homeInstitutions.length > 0 && (
+                        <optgroup label="Campuses & Institutions">
+                          {homeInstitutions.map((inst) => (
+                            <option key={`inst-${inst.name}`} value={inst.name}>
+                              {inst.country ? `${getCountryConfig(inst.country).flag} ` : ''}
+                              {inst.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {homeMarkets.length > 0 && (
+                        <optgroup label="Major Markets & Hubs">
+                          {homeMarkets.map((mkt) => (
+                            <option key={`mkt-${mkt}`} value={mkt}>
+                              {mkt}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   </div>
                 </section>
@@ -1323,6 +1545,7 @@ export default function App() {
                       {(search ||
                         selectedCategory !== 'All' ||
                         selectedCondition !== 'All' ||
+                        selectedState !== 'All' ||
                         selectedInstitution !== 'All' ||
                         filterMode !== 'all') && (
                         <button
@@ -1331,6 +1554,7 @@ export default function App() {
                             setSearch('');
                             setSelectedCategory('All');
                             setSelectedCondition('All');
+                            setSelectedState('All');
                             setSelectedInstitution('All');
                             setFilterMode('all');
                           }}
@@ -1418,6 +1642,7 @@ export default function App() {
                   onToggleWishlist={handleToggleWishlist}
                   onViewDetails={(it) => setDetailItem(it)}
                   onBuyNow={handleBuyNow}
+                  onAddToCart={handleAddToCart}
                   onChat={(it) => handleOpenChat(it)}
                   onReport={handleTriggerReport}
                   onPostItem={() => setActiveTab('post')}
@@ -1440,12 +1665,18 @@ export default function App() {
                       ...newItem,
                       photos: newItem.thumbnails?.length ? newItem.thumbnails : newItem.photos.slice(0, 1),
                     };
-                    setItems((prev) => {
-                      const next = [liteNew, ...prev];
-                      setCachedItems(next);
-                      return next;
-                    });
-                    setTotalItemsCount((c) => c + 1);
+                    const itemCountry = newItem.country || country;
+                    if (country === 'All' || itemCountry.toLowerCase() === country.toLowerCase()) {
+                      setItems((prev) => {
+                        const next = [liteNew, ...prev];
+                        setCachedItems(next, country);
+                        return next;
+                      });
+                      setTotalItemsCount((c) => c + 1);
+                    } else {
+                      const prevCountryCache = getCachedItems(itemCountry);
+                      setCachedItems([liteNew, ...prevCountryCache], itemCountry);
+                    }
                     setActiveTab('home');
                     showToast('Your item is now live in the marketplace!');
                   }}
@@ -1520,7 +1751,18 @@ export default function App() {
                   }}
                   onUserUpdated={(u) => setUser(u)}
                   onLogout={handleLogout}
-                  onOpenOwnerDashboard={() => setShowOwnerDashboard(true)}
+                  onOpenOwnerDashboard={() => {
+                    setShowOwnerDashboard(true);
+                    try {
+                      localStorage.setItem(OWNER_VIEW_KEY, '1');
+                    } catch {
+                      // Ignore
+                    }
+                  }}
+                  onNavigateTab={(tab) => {
+                    setShowOwnerDashboard(false);
+                    setActiveTab(tab);
+                  }}
                   onViewItem={(it) => setDetailItem(it)}
                   onNotice={(msg) => {
                     showToast(msg);
@@ -1533,7 +1775,7 @@ export default function App() {
 
             {/* Google AdSense ONLY: Right Sidebar on Desktop, Bottom of Page on Mobile, ZERO Ads during Checkout */}
             <aside className="lg:col-span-3 mt-6 lg:mt-0 lg:sticky lg:top-20">
-              {!checkoutItem && (
+              {!checkoutItem && !cartCheckoutActive && (
                 <AdSlot
                   settings={adSettings}
                   ready={productsLoaded}
@@ -1617,14 +1859,51 @@ export default function App() {
         />
       </Suspense>
 
-      {/* Step 1: Mandatory Language & Country Picker BEFORE Signup / On First Visit */}
+      {/* Step 1: Mandatory Language & Country -> State -> Area Picker BEFORE Signup / On First Visit */}
       <LanguagePickerModal
         open={!hasChosenLanguage || langModalOpen}
         canClose={hasChosenLanguage}
         user={user}
+        initialState={selectedState}
+        initialArea={selectedInstitution}
+        onLocationSelected={({ state, area }) => {
+          setSelectedState(state || 'All');
+          setSelectedInstitution(area || 'All');
+        }}
         onUserUpdated={(u) => setUser(u)}
         onClose={() => setLangModalOpen(false)}
       />
+
+      {/* Slide-Over Cart Drawer */}
+      {cartOpen && (
+        <Suspense fallback={null}>
+          <CartDrawer
+            open={cartOpen}
+            cartItems={cartItems}
+            onClose={() => setCartOpen(false)}
+            onUpdateQuantity={handleUpdateCartQty}
+            onRemoveItem={handleRemoveCartItem}
+            onClearCart={handleClearCart}
+            onViewItem={(it) => setDetailItem(it)}
+            onCheckoutSingle={(it) => {
+              setCartOpen(false);
+              handleBuyNow(it);
+            }}
+            onCheckoutAll={() => {
+              if (!user) {
+                setCartOpen(false);
+                setAuthMode('login');
+                setAuthModalOpen(true);
+                showToast('Please login or create a free account to pay safely via Paystack.');
+                return;
+              }
+              setCartOpen(false);
+              setCheckoutItem(null);
+              setCartCheckoutActive(true);
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* Modals (lazy-loaded on demand) */}
       {authModalOpen && (
@@ -1634,7 +1913,7 @@ export default function App() {
             initialMode={authMode}
             onClose={() => setAuthModalOpen(false)}
             onOpenPolicy={(id) => setActivePolicy(id)}
-            onSuccess={(token, loggedInUser) => {
+            onSuccess={(token, loggedInUser, isNewSignup) => {
               setStoredToken(token);
               setUser(loggedInUser);
               setAuthModalOpen(false);
@@ -1643,6 +1922,14 @@ export default function App() {
               }
               if (loggedInUser.role === 'owner') {
                 setShowOwnerDashboard(true);
+                try {
+                  localStorage.setItem(OWNER_VIEW_KEY, '1');
+                } catch {
+                  // Ignore
+                }
+              } else if (isNewSignup) {
+                setShowOwnerDashboard(false);
+                setActiveTab('profile');
               }
               refreshUnread();
               fetchWishlist();
@@ -1661,6 +1948,7 @@ export default function App() {
             onToggleWishlist={handleToggleWishlist}
             onClose={() => setDetailItem(null)}
             onBuyNow={handleBuyNow}
+            onAddToCart={handleAddToCart}
             onChat={handleOpenChat}
             onReportItem={handleTriggerReport}
             onBlockSeller={handleBlockSeller}
@@ -1668,24 +1956,35 @@ export default function App() {
         </Suspense>
       )}
 
-      {checkoutItem && (
+      {(checkoutItem || (cartCheckoutActive && cartItems.length > 0)) && (
         <Suspense fallback={null}>
           <CheckoutModal
             item={checkoutItem}
+            cartItems={cartCheckoutActive ? cartItems : undefined}
             user={user}
             adSettings={adSettings}
-            onClose={() => setCheckoutItem(null)}
+            onClose={() => {
+              setCheckoutItem(null);
+              setCartCheckoutActive(false);
+            }}
             onRequireAuth={() => {
               setCheckoutItem(null);
+              setCartCheckoutActive(false);
               setAuthMode('login');
               setAuthModalOpen(true);
             }}
             onOpenPolicy={(id) => {
               setCheckoutItem(null);
+              setCartCheckoutActive(false);
               setActivePolicy(id);
             }}
             onOrderSuccess={() => {
               showToast('Payment Successful via Paystack. Admin and Seller have been paid via Split.');
+            }}
+            onCartCheckoutSuccess={() => {
+              setCartItems([]);
+              setCartCheckoutActive(false);
+              showToast('Cart checkout completed! View all your Escrow Orders in Profile.');
             }}
           />
         </Suspense>
