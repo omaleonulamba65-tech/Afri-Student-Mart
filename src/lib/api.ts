@@ -348,13 +348,21 @@ function phoneLookupCandidates(rawPhone: string): string[] {
   if (clean) set.add(clean);
   if (digits) {
     set.add(digits);
+    set.add(`+${digits}`);
     for (const cc of ['234', '233', '27', '221', '225']) {
       if (digits.startsWith('0')) {
-        set.add(`${cc}${digits.slice(1)}`);
+        const local = digits.slice(1);
+        set.add(`${cc}${local}`);
+        set.add(`+${cc}${local}`);
       } else if (digits.startsWith(cc)) {
-        set.add(`0${digits.slice(cc.length)}`);
+        const local = digits.slice(cc.length);
+        set.add(`0${local}`);
+        set.add(local);
+        set.add(`+${cc}${local}`);
       } else if (digits.length <= 10) {
         set.add(`${cc}${digits}`);
+        set.add(`+${cc}${digits}`);
+        set.add(`0${digits}`);
       }
     }
   }
@@ -527,11 +535,60 @@ async function fetchProfilesIndex(): Promise<{
   return { byId, byPhone, all, mode };
 }
 
+async function fetchOwnerRecordForUser(params: {
+  id?: string;
+  email?: string | null;
+  phone?: string;
+}): Promise<Record<string, unknown> | null> {
+  try {
+    if (params.id) {
+      const byId = await supabase.from('owners').select('*').eq('id', params.id).maybeSingle();
+      if (!byId.error && byId.data) return byId.data as Record<string, unknown>;
+    }
+    if (params.email) {
+      const cleanEmail = params.email.trim().toLowerCase();
+      const byEmail = await supabase.from('owners').select('*').ilike('email', cleanEmail).maybeSingle();
+      if (!byEmail.error && byEmail.data) return byEmail.data as Record<string, unknown>;
+    }
+    if (params.phone) {
+      const candidates = phoneLookupCandidates(params.phone);
+      const byPhone = await supabase.from('owners').select('*').in('phone', candidates).limit(1);
+      if (!byPhone.error && Array.isArray(byPhone.data) && byPhone.data[0]) {
+        return byPhone.data[0] as Record<string, unknown>;
+      }
+    }
+  } catch {
+    // owners table optional
+  }
+  return null;
+}
+
 async function syncUserProfileRow(
   authUser: { id: string; email?: string | null; user_metadata?: Record<string, unknown>; created_at?: string }
 ): Promise<Record<string, unknown> | null> {
   const meta = (authUser.user_metadata || {}) as Record<string, unknown>;
   const phone = String(meta.phone_number || '').trim();
+  const ownerRow = await fetchOwnerRecordForUser({
+    id: authUser.id,
+    email: authUser.email,
+    phone,
+  });
+  const isOwnerMetaOrTable =
+    meta.role === 'owner' || String(ownerRow?.role || '').toLowerCase() === 'owner';
+
+  const applyOwnerOverlay = (base: Record<string, unknown>): Record<string, unknown> => {
+    if (!isOwnerMetaOrTable && String(base.role || '').toLowerCase() !== 'owner') {
+      return base;
+    }
+    return {
+      ...base,
+      role: 'owner',
+      full_name: String(ownerRow?.owner_name || base.full_name || meta.full_name || 'Mart Owner'),
+      business_name: String(ownerRow?.business_name || base.business_name || meta.business_name || 'JOKIPEKI GROUP'),
+      phone_number: String(base.phone_number || ownerRow?.phone || phone || ''),
+      email: String(base.email || ownerRow?.email || authUser.email || ''),
+    };
+  };
 
   // 1) Try `profiles` table first (primary production table)
   const existingProfile = await supabase
@@ -541,22 +598,24 @@ async function syncUserProfileRow(
     .maybeSingle();
 
   if (!existingProfile.error && existingProfile.data) {
-    return existingProfile.data as Record<string, unknown>;
+    return applyOwnerOverlay(existingProfile.data as Record<string, unknown>);
   }
 
   if (!existingProfile.error) {
-    const roleVal =
-      meta.role === 'owner'
-        ? 'owner'
-        : meta.account_type === 'trader' || meta.account_type === 'service_provider' || meta.role === 'seller'
-        ? 'seller'
-        : 'buyer';
+    const roleVal = isOwnerMetaOrTable
+      ? 'owner'
+      : meta.account_type === 'trader' || meta.account_type === 'service_provider' || meta.role === 'seller'
+      ? 'seller'
+      : 'buyer';
     const payload = {
       id: authUser.id,
-      full_name: String(meta.full_name || authUser.email?.split('@')[0] || 'Mart Member'),
-      business_name: roleVal === 'owner' ? 'JOKIPEKI GROUP' : String(meta.shop_name || ''),
+      full_name: String(ownerRow?.owner_name || meta.full_name || authUser.email?.split('@')[0] || 'Mart Member'),
+      business_name:
+        roleVal === 'owner'
+          ? String(ownerRow?.business_name || meta.business_name || 'JOKIPEKI GROUP')
+          : String(meta.shop_name || ''),
       email: authUser.email || (typeof meta.email === 'string' ? meta.email : null),
-      phone_number: phone || null,
+      phone_number: phone || (typeof ownerRow?.phone === 'string' ? ownerRow.phone : null),
       country_code: String(meta.country_code || '+234'),
       country: String(meta.country || 'Nigeria'),
       language: String(meta.language || 'English'),
@@ -583,32 +642,31 @@ async function syncUserProfileRow(
     };
     const ins = await supabase.from('profiles').upsert(payload, { onConflict: 'id' }).select('*').maybeSingle();
     if (!ins.error && ins.data) {
-      return ins.data as Record<string, unknown>;
+      return applyOwnerOverlay(ins.data as Record<string, unknown>);
     }
   }
 
   // 2) Fallback to legacy `users` table if `profiles` table does not exist yet
   try {
     const byId = await supabase.from('users').select('*').eq('id', authUser.id).maybeSingle();
-    if (!byId.error && byId.data) return byId.data as Record<string, unknown>;
+    if (!byId.error && byId.data) return applyOwnerOverlay(byId.data as Record<string, unknown>);
 
     if (phone) {
       const byPhone = await supabase.from('users').select('*').eq('phone_number', phone).maybeSingle();
-      if (!byPhone.error && byPhone.data) return byPhone.data as Record<string, unknown>;
+      if (!byPhone.error && byPhone.data) return applyOwnerOverlay(byPhone.data as Record<string, unknown>);
     }
 
-    const derivedRole =
-      meta.role === 'owner'
-        ? 'owner'
-        : meta.account_type === 'trader' || meta.account_type === 'service_provider' || meta.role === 'seller'
-        ? 'seller'
-        : 'buyer';
-    const safePhone = phone || `auth_${authUser.id.slice(0, 12)}`;
+    const derivedRole = isOwnerMetaOrTable
+      ? 'owner'
+      : meta.account_type === 'trader' || meta.account_type === 'service_provider' || meta.role === 'seller'
+      ? 'seller'
+      : 'buyer';
+    const safePhone = phone || (typeof ownerRow?.phone === 'string' ? ownerRow.phone : '') || `auth_${authUser.id.slice(0, 12)}`;
     const insLegacy = await supabase
       .from('users')
       .insert({
         id: authUser.id,
-        full_name: String(meta.full_name || authUser.email?.split('@')[0] || 'Mart Member'),
+        full_name: String(ownerRow?.owner_name || meta.full_name || authUser.email?.split('@')[0] || 'Mart Member'),
         phone_number: safePhone,
         password: '[supabase_auth]',
         role: derivedRole,
@@ -619,9 +677,12 @@ async function syncUserProfileRow(
       })
       .select('*')
       .maybeSingle();
-    return (insLegacy.data as Record<string, unknown> | null) || null;
+    if (insLegacy.data) {
+      return applyOwnerOverlay(insLegacy.data as Record<string, unknown>);
+    }
+    return isOwnerMetaOrTable ? applyOwnerOverlay({ id: authUser.id }) : null;
   } catch {
-    return null;
+    return isOwnerMetaOrTable ? applyOwnerOverlay({ id: authUser.id }) : null;
   }
 }
 
@@ -894,6 +955,16 @@ export const api = {
       const hit = Array.isArray(profMatches) ? (profMatches[0] as { email?: string } | undefined) : undefined;
       if (hit?.email) {
         resolvedEmail = hit.email.trim().toLowerCase();
+      } else {
+        const { data: ownerMatches } = await supabase
+          .from('owners')
+          .select('email, phone, role')
+          .in('phone', candidates)
+          .limit(1);
+        const ownerHit = Array.isArray(ownerMatches) ? (ownerMatches[0] as { email?: string } | undefined) : undefined;
+        if (ownerHit?.email) {
+          resolvedEmail = ownerHit.email.trim().toLowerCase();
+        }
       }
     }
 

@@ -348,6 +348,16 @@ alter table public.bookings disable row level security;
 alter table public.ad_settings disable row level security;
 alter table public.account_block_logs disable row level security;
 
+create table if not exists public.owners (
+  id uuid primary key default gen_random_uuid(),
+  email text unique,
+  phone text,
+  owner_name text default '',
+  business_name text default 'JOKIPEKI GROUP',
+  role text not null default 'owner'
+);
+alter table public.owners disable row level security;
+
 -- ============================================================================
 -- 6. ENABLE SUPABASE REALTIME FOR LIVE CHAT & NOTIFICATIONS
 -- ============================================================================
@@ -364,8 +374,16 @@ exception when duplicate_object then null;
 end $$;
 
 -- ============================================================================
--- 7. OWNER ROLE SETUP EXAMPLE (Run with your Owner Auth user's email/id)
+-- 7. OWNER ROLE SETUP EXAMPLE (Run in Supabase Dashboard -> SQL Editor)
 -- ============================================================================
+-- update auth.users
+--   set raw_user_meta_data = jsonb_set(coalesce(raw_user_meta_data, '{}'::jsonb), '{role}', '"owner"')
+-- where email = 'your-owner-email@example.com';
+--
+-- update public.owners
+--   set role = 'owner'
+-- where email = 'your-owner-email@example.com';
+--
 -- update public.profiles
 --   set role = 'owner', business_name = 'JOKIPEKI GROUP'
 -- where email = 'your-owner-email@example.com';
