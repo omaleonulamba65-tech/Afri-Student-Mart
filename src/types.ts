@@ -134,7 +134,7 @@ export interface MarketplaceItem {
   distance_km?: number;
   is_featured: boolean;
   report_count: number;
-  status: 'active' | 'removed';
+  status: 'active' | 'pending' | 'rejected' | 'removed';
   created_at: string;
 }
 
@@ -293,6 +293,10 @@ export interface AdSettings {
   paystack_public_key?: string;
   paystack_split_code?: string;
   admin_subaccount_code?: string;
+  commission_percent?: number;
+  site_name?: string;
+  announcement?: string;
+  announcement_enabled?: boolean;
 }
 
 export interface ReportRecord {
@@ -364,6 +368,72 @@ export interface OwnerFinanceSummary {
   total_admin_kept: number;
   total_seller_payouts: number;
   pending_refunds_count: number;
+  total_money_in?: number;
+  total_money_out?: number;
+  money_to_pay_sellers?: number;
+  money_paid_to_sellers?: number;
+  pending_payments_count?: number;
+  pending_payments_amount?: number;
+  successful_payments_count?: number;
+  successful_payments_amount?: number;
+  failed_payments_count?: number;
+  failed_payments_amount?: number;
+  commission_percent?: number;
+}
+
+export interface OwnerSalesPoint {
+  label: string;
+  sales: number;
+  orders: number;
+  commission: number;
+}
+
+export interface OwnerPopularProduct {
+  id: string;
+  title: string;
+  price: number;
+  seller_name: string;
+  institution: string;
+  orders_count: number;
+  messages_count: number;
+  revenue: number;
+  photo: string;
+}
+
+export interface OwnerActiveSeller {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  shop_name?: string;
+  listings_count: number;
+  orders_count: number;
+  revenue: number;
+}
+
+export interface OwnerStealthMessage {
+  id: string;
+  sender_name: string;
+  sender_phone: string;
+  sender_role_label: 'Buyer' | 'Seller' | 'Member';
+  message: string;
+  created_at: string;
+}
+
+export interface OwnerStealthThread {
+  thread_key: string;
+  listing_id: string;
+  item_title: string;
+  item_price: number;
+  buyer_name: string;
+  buyer_phone: string;
+  buyer_email: string;
+  seller_name: string;
+  seller_phone: string;
+  seller_email: string;
+  last_message_at: string;
+  message_count: number;
+  messages: OwnerStealthMessage[];
 }
 
 export interface OwnerDashboardData {
@@ -372,9 +442,13 @@ export interface OwnerDashboardData {
     total_buyers: number;
     total_sellers: number;
     total_items: number;
+    total_all_items?: number;
     total_messages: number;
     total_institutions: number;
     open_reports: number;
+    orders_today?: number;
+    orders_week?: number;
+    orders_month?: number;
   };
   finance?: OwnerFinanceSummary;
   orders?: Array<
@@ -383,6 +457,13 @@ export interface OwnerDashboardData {
       seller_phone: string;
     }
   >;
+  sales_series_daily?: OwnerSalesPoint[];
+  sales_series_weekly?: OwnerSalesPoint[];
+  popular_products?: OwnerPopularProduct[];
+  active_sellers?: OwnerActiveSeller[];
+  buyer_purchases?: Record<string, string[]>;
+  seller_listings?: Record<string, string[]>;
+  chat_threads?: OwnerStealthThread[];
   institutions: Array<{ name: string; users: number; items: number }>;
   users: Array<PublicUser & { phone_number: string }>;
   items: Array<MarketplaceItem & { seller_phone: string }>;

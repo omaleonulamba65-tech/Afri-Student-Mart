@@ -1120,33 +1120,20 @@ Keep answers concise, practical, and easy to read on a small Android phone scree
     process.env.NODE_ENV === 'development' ||
     process.env.npm_lifecycle_event === 'dev' ||
     process.env.DISABLE_HMR === 'true';
-  const isProd =
+  const useStaticProd =
     process.env.NODE_ENV === 'production' ||
-    Boolean(process.env.K_SERVICE) ||
     (!isDevMode && fs.existsSync(distIndexPath));
 
-  if (!isProd) {
-    try {
-      const { createServer: createViteServer } = await import('vite');
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: 'spa',
-      });
-      app.use(vite.middlewares);
-    } catch (viteErr) {
-      console.warn(
-        'Vite dev middleware unavailable, falling back to static dist/:',
-        viteErr instanceof Error ? viteErr.message : viteErr
-      );
-      app.use(express.static(distDir));
-      app.get('*', (_req, res) => {
-        if (fs.existsSync(distIndexPath)) {
-          res.sendFile(distIndexPath);
-        } else {
-          res.status(503).send('Application build not found.');
-        }
-      });
-    }
+  if (!useStaticProd) {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR === 'true' || Boolean(process.env.K_SERVICE) ? false : undefined,
+      },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
   } else {
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
@@ -1158,8 +1145,17 @@ Keep answers concise, practical, and easy to read on a small Android phone scree
     });
   }
 
-  const parsedPort = Number.parseInt(process.env.PORT ?? '', 10);
-  const PORT = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 3000;
+  const portArgIndex = process.argv.indexOf('--port');
+  const argvPort = portArgIndex >= 0 ? Number.parseInt(process.argv[portArgIndex + 1] ?? '', 10) : NaN;
+  const parsedEnvPort = Number.parseInt(process.env.PORT ?? '', 10);
+  const PORT =
+    Number.isFinite(argvPort) && argvPort > 0
+      ? argvPort
+      : isDevMode && parsedEnvPort === 8080
+      ? 3000
+      : Number.isFinite(parsedEnvPort) && parsedEnvPort > 0
+      ? parsedEnvPort
+      : 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Afri Student Mart listening on http://0.0.0.0:${PORT}`);
     void ensureOwnerSeededInSupabase().catch((err) => {

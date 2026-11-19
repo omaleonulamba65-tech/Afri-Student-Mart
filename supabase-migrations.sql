@@ -282,8 +282,17 @@ create table if not exists public.ad_settings (
   google_ads_earnings numeric not null default 0,
   paystack_public_key text default '',
   paystack_split_code text default '',
-  admin_subaccount_code text default ''
+  admin_subaccount_code text default '',
+  commission_percent numeric not null default 10,
+  site_name text not null default 'Afri Student Mart',
+  announcement text default '',
+  announcement_enabled boolean not null default false
 );
+
+alter table public.ad_settings add column if not exists commission_percent numeric not null default 10;
+alter table public.ad_settings add column if not exists site_name text not null default 'Afri Student Mart';
+alter table public.ad_settings add column if not exists announcement text default '';
+alter table public.ad_settings add column if not exists announcement_enabled boolean not null default false;
 
 insert into public.ad_settings (id) values ('default') on conflict (id) do nothing;
 
@@ -307,7 +316,19 @@ create policy "Authenticated users can read their own messages"
   on public.messages
   for select
   to authenticated
-  using (auth.uid() = sender_id or auth.uid() = receiver_id);
+  using (
+    auth.uid() = sender_id
+    or auth.uid() = receiver_id
+    or exists (
+      select 1 from public.owners o
+      where lower(o.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        and o.role = 'owner'
+    )
+    or exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.role = 'owner'
+    )
+  );
 
 drop policy if exists "Authenticated users can insert their own messages" on public.messages;
 create policy "Authenticated users can insert their own messages"

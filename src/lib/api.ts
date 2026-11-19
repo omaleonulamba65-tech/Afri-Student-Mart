@@ -8,7 +8,12 @@ import type {
   ItemFilterMode,
   ItemOffer,
   MarketplaceItem,
+  OwnerActiveSeller,
   OwnerDashboardData,
+  OwnerPopularProduct,
+  OwnerSalesPoint,
+  OwnerStealthMessage,
+  OwnerStealthThread,
   PublicUser,
   RatingRecord,
   ReportRecord,
@@ -21,6 +26,13 @@ import { inferCountryFromLocationText } from '../data/countryDocuments';
 import { getCountryConfig } from '../data/languages';
 import { PAYSTACK_PUBLIC_KEY_PLACEHOLDER, PAYSTACK_SPLIT_CODE_PLACEHOLDER } from './paystack';
 import { supabase } from './supabaseClient';
+
+export const OWNER_ALLOWED_EMAIL = 'omaleonulamba65@gmail.com';
+
+export function isVerifiedOwnerUser(user: PublicUser | null | undefined): boolean {
+  if (!user || user.role !== 'owner') return false;
+  return (user.email || '').trim().toLowerCase() === OWNER_ALLOWED_EMAIL;
+}
 
 const LOW_DATA_KEY = 'afri_student_mart_low_data_mode';
 const itemDetailCache = new Map<string, MarketplaceItem>();
@@ -781,7 +793,10 @@ function mapSupabaseItemRow(
     distance_km: 1,
     is_featured: Boolean(row.is_featured),
     report_count: Number(row.report_count || 0),
-    status: row.status === 'removed' ? 'removed' : 'active',
+    status:
+      row.status === 'removed' || row.status === 'rejected' || row.status === 'pending'
+        ? row.status
+        : 'active',
     created_at: String(row.created_at || new Date().toISOString()),
   };
 }
@@ -1018,6 +1033,35 @@ export const api = {
   logout: async () => {
     setStoredToken(null);
     await supabase.auth.signOut().catch(() => {});
+  },
+
+  ownerLogin: async (payload: {
+    email: string;
+    password: string;
+  }): Promise<{ token: string; user: PublicUser }> => {
+    const cleanEmail = (payload.email || '').trim().toLowerCase();
+    if (cleanEmail !== OWNER_ALLOWED_EMAIL || !payload.password) {
+      throw new Error('Access Denied');
+    }
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password: payload.password,
+    });
+    if (error || !data.user || !data.session) {
+      throw new Error('Access Denied');
+    }
+    const dbRow = await syncUserProfileRow(data.user);
+    const publicUser = mapDbRowToPublicUser(dbRow || {}, data.user);
+    if (!isVerifiedOwnerUser(publicUser)) {
+      await supabase.auth.signOut().catch(() => {});
+      setStoredToken(null);
+      throw new Error('Access Denied');
+    }
+    setStoredToken(data.session.access_token);
+    return {
+      token: data.session.access_token,
+      user: publicUser,
+    };
   },
 
   getMe: async (): Promise<{ user: PublicUser }> => {
@@ -2538,6 +2582,10 @@ export const api = {
       paystack_public_key: PAYSTACK_PUBLIC_KEY_PLACEHOLDER,
       paystack_split_code: PAYSTACK_SPLIT_CODE_PLACEHOLDER,
       admin_subaccount_code: '',
+      commission_percent: 10,
+      site_name: 'Afri Student Mart',
+      announcement: '',
+      announcement_enabled: false,
     };
     const { data, error } = await supabase
       .from('ad_settings')
@@ -2559,24 +2607,33 @@ export const api = {
         paystack_public_key: String(r.paystack_public_key || PAYSTACK_PUBLIC_KEY_PLACEHOLDER),
         paystack_split_code: String(r.paystack_split_code || PAYSTACK_SPLIT_CODE_PLACEHOLDER),
         admin_subaccount_code: String(r.admin_subaccount_code || ''),
+        commission_percent:
+          typeof r.commission_percent === 'number' || typeof r.commission_percent === 'string'
+            ? Number(r.commission_percent)
+            : 10,
+        site_name: typeof r.site_name === 'string' && r.site_name.trim() ? r.site_name : 'Afri Student Mart',
+        announcement: typeof r.announcement === 'string' ? r.announcement : '',
+        announcement_enabled: Boolean(r.announcement_enabled),
       },
     };
   },
 
   getOwnerDashboard: async (): Promise<OwnerDashboardData> => {
     const me = await getAuthenticatedUser();
-    if (me.role !== 'owner') {
-      throw new Error('Access denied: Owner account required.');
+    if (!isVerifiedOwnerUser(me)) {
+      throw new Error('Access Denied');
     }
 
-    const [profilesIdx, itemsRes, ordersRes, reportsRes, msgsCountRes, adRes] = await Promise.all([
+    const [profilesIdx, itemsRes, ordersRes, reportsRes, msgsRes, adRes] = await Promise.all([
       fetchProfilesIndex(),
       supabase.from('items').select('*').order('created_at', { ascending: false }),
       supabase.from('orders').select('*').order('created_at', { ascending: false }),
       supabase.from('reports').select('*').order('created_at', { ascending: false }),
-      supabase.from('messages').select('id', { count: 'exact', head: true }),
+      supabase.from('messages').select('*').order('created_at', { ascending: true }).limit(1500),
       api.getAdSettings(),
     ]);
+
+    const commissionPercent = Number(adRes.settings.commission_percent ?? 10);
 
     const users = profilesIdx.all.map((u) => ({
       ...u,
@@ -2609,7 +2666,9 @@ export const api = {
           product_price: Number(o.product_price || 0),
           delivery_fee: Number(o.delivery_fee || 0),
           total_amount: Number(o.total_amount || 0),
-          admin_commission: Number(o.admin_commission || 0),
+          admin_commission:
+            Number(o.admin_commission || 0) ||
+            Math.round(Number(o.product_price || 0) * (commissionPercent / 100)),
           admin_total_kept: Number(o.admin_total_kept || 0),
           seller_payout: Number(o.seller_payout || 0),
           delivery_address: String(o.delivery_address || ''),
@@ -2633,6 +2692,70 @@ export const api = {
         }))
       : [];
 
+    // Date windows for Today / This Week / This Month
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfWeek = startOfToday - 6 * 24 * 60 * 60 * 1000;
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+    let ordersToday = 0;
+    let ordersWeek = 0;
+    let ordersMonth = 0;
+    for (const o of orders) {
+      const ts = new Date(o.created_at).getTime();
+      if (!Number.isFinite(ts)) continue;
+      if (ts >= startOfToday) ordersToday += 1;
+      if (ts >= startOfWeek) ordersWeek += 1;
+      if (ts >= startOfMonth) ordersMonth += 1;
+    }
+
+    // Daily sales series (last 14 days)
+    const dailyMap = new Map<string, OwnerSalesPoint>();
+    for (let i = 13; i >= 0; i -= 1) {
+      const d = new Date(startOfToday - i * 24 * 60 * 60 * 1000);
+      const key = d.toISOString().slice(0, 10);
+      dailyMap.set(key, {
+        label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        sales: 0,
+        orders: 0,
+        commission: 0,
+      });
+    }
+    for (const o of orders) {
+      const key = String(o.created_at || '').slice(0, 10);
+      const slot = dailyMap.get(key);
+      if (slot && o.order_status !== 'cancelled' && o.order_status !== 'refund_approved') {
+        slot.sales += o.total_amount;
+        slot.orders += 1;
+        slot.commission += o.admin_commission;
+      }
+    }
+
+    // Weekly sales series (last 8 weeks)
+    const salesSeriesWeekly: OwnerSalesPoint[] = [];
+    for (let w = 7; w >= 0; w -= 1) {
+      const endTs = startOfToday + 24 * 60 * 60 * 1000 - w * 7 * 24 * 60 * 60 * 1000;
+      const startTs = endTs - 7 * 24 * 60 * 60 * 1000;
+      const startDate = new Date(startTs);
+      const point: OwnerSalesPoint = {
+        label: startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        sales: 0,
+        orders: 0,
+        commission: 0,
+      };
+      for (const o of orders) {
+        if (o.order_status === 'cancelled' || o.order_status === 'refund_approved') continue;
+        const ts = new Date(o.created_at).getTime();
+        if (ts >= startTs && ts < endTs) {
+          point.sales += o.total_amount;
+          point.orders += 1;
+          point.commission += o.admin_commission;
+        }
+      }
+      salesSeriesWeekly.push(point);
+    }
+
+    // Institutions, buyers purchases, sellers listings
     const instStats = new Map<string, { name: string; users: number; items: number }>();
     for (const u of users) {
       if (!u.institution) continue;
@@ -2647,14 +2770,224 @@ export const api = {
       instStats.set(it.institution, cur);
     }
 
-    const totalSales = orders.reduce((s, o) => s + o.total_amount, 0);
-    const totalAdminCommission = orders.reduce((s, o) => s + o.admin_commission, 0);
+    const buyerPurchases: Record<string, string[]> = {};
+    for (const o of orders) {
+      const keys = [o.buyer_id, o.buyer_phone, o.buyer_email].filter(Boolean);
+      for (const k of keys) {
+        if (!buyerPurchases[k]) buyerPurchases[k] = [];
+        if (o.item_title && !buyerPurchases[k].includes(o.item_title)) {
+          buyerPurchases[k].push(o.item_title);
+        }
+      }
+    }
+
+    const sellerListings: Record<string, string[]> = {};
+    for (const it of items) {
+      const keys = [it.seller_id, it.seller_phone].filter(Boolean);
+      for (const k of keys) {
+        if (!sellerListings[k]) sellerListings[k] = [];
+        if (it.title && !sellerListings[k].includes(it.title)) {
+          sellerListings[k].push(it.title);
+        }
+      }
+    }
+
+    // Stealth Read-Only Chat Transcripts (ZERO writes / ZERO read-receipt mutations)
+    const rawMsgs = Array.isArray(msgsRes.data)
+      ? (msgsRes.data as Array<Record<string, unknown>>)
+      : [];
+    const itemById = new Map(items.map((it) => [it.id, it]));
+    const msgCountByItem = new Map<string, number>();
+    const threadMap = new Map<string, OwnerStealthThread>();
+
+    for (const r of rawMsgs) {
+      const listingId = String(r.listing_id || r.item_id || 'general');
+      msgCountByItem.set(listingId, (msgCountByItem.get(listingId) || 0) + 1);
+
+      const senderId = String(r.sender_id || '');
+      const receiverId = String(r.receiver_id || '');
+      const buyerPhone = String(r.buyer_phone || '');
+      const sellerPhone = String(r.seller_phone || '');
+      const senderPhone = String(r.sender_phone || buyerPhone || '');
+
+      const linkedItem = itemById.get(listingId);
+      const resolvedSellerProf =
+        (linkedItem?.seller_id && profilesIdx.byId.get(linkedItem.seller_id)) ||
+        (sellerPhone && profilesIdx.byPhone.get(sellerPhone)) ||
+        (receiverId && profilesIdx.byId.get(receiverId)) ||
+        undefined;
+
+      const resolvedBuyerProf =
+        (buyerPhone && profilesIdx.byPhone.get(buyerPhone)) ||
+        (senderId && senderId !== resolvedSellerProf?.id ? profilesIdx.byId.get(senderId) : undefined) ||
+        (receiverId && receiverId !== resolvedSellerProf?.id ? profilesIdx.byId.get(receiverId) : undefined) ||
+        undefined;
+
+      const p1Key = resolvedBuyerProf?.id || buyerPhone || senderId || 'buyer';
+      const p2Key = resolvedSellerProf?.id || sellerPhone || receiverId || linkedItem?.seller_id || 'seller';
+      const sortedPair = [p1Key, p2Key].sort().join('::');
+      const threadKey = `${listingId}::${sortedPair}`;
+
+      const senderProf =
+        (senderId ? profilesIdx.byId.get(senderId) : undefined) ||
+        (senderPhone ? profilesIdx.byPhone.get(senderPhone) : undefined);
+      const isSenderSeller =
+        Boolean(resolvedSellerProf && senderProf?.id === resolvedSellerProf.id) ||
+        Boolean(sellerPhone && senderPhone === sellerPhone);
+
+      const msgEntry: OwnerStealthMessage = {
+        id: String(r.id || `${threadKey}_${r.created_at}`),
+        sender_name:
+          senderProf?.full_name ||
+          (isSenderSeller ? linkedItem?.seller_name : resolvedBuyerProf?.full_name) ||
+          senderPhone ||
+          'Member',
+        sender_phone: senderProf?.phone_number || senderPhone || '',
+        sender_role_label: isSenderSeller ? 'Seller' : buyerPhone || resolvedBuyerProf ? 'Buyer' : 'Member',
+        message: String(r.message || ''),
+        created_at: String(r.created_at || new Date().toISOString()),
+      };
+
+      const existing = threadMap.get(threadKey);
+      if (!existing) {
+        threadMap.set(threadKey, {
+          thread_key: threadKey,
+          listing_id: listingId,
+          item_title: linkedItem?.title || (listingId.startsWith('shop:') ? 'Trader Shop Inquiry' : listingId.startsWith('service:') ? 'Service Inquiry' : 'Marketplace Chat'),
+          item_price: linkedItem?.price || 0,
+          buyer_name: resolvedBuyerProf?.full_name || buyerPhone || 'Buyer',
+          buyer_phone: resolvedBuyerProf?.phone_number || buyerPhone || '',
+          buyer_email: resolvedBuyerProf?.email || '',
+          seller_name: resolvedSellerProf?.full_name || linkedItem?.seller_name || sellerPhone || 'Seller',
+          seller_phone: resolvedSellerProf?.phone_number || sellerPhone || linkedItem?.seller_phone || '',
+          seller_email: resolvedSellerProf?.email || '',
+          last_message_at: msgEntry.created_at,
+          message_count: 1,
+          messages: [msgEntry],
+        });
+      } else {
+        existing.messages.push(msgEntry);
+        existing.message_count += 1;
+        existing.last_message_at = msgEntry.created_at;
+      }
+    }
+
+    const chatThreads = Array.from(threadMap.values()).sort(
+      (a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
+    );
+
+    // Most Popular Products
+    const orderStatsByItem = new Map<string, { count: number; revenue: number }>();
+    for (const o of orders) {
+      if (!o.item_id) continue;
+      const cur = orderStatsByItem.get(o.item_id) || { count: 0, revenue: 0 };
+      cur.count += 1;
+      cur.revenue += o.total_amount;
+      orderStatsByItem.set(o.item_id, cur);
+    }
+    const popularProducts: OwnerPopularProduct[] = items
+      .map((it) => {
+        const oStat = orderStatsByItem.get(it.id) || { count: 0, revenue: 0 };
+        const mCount = msgCountByItem.get(it.id) || 0;
+        return {
+          id: it.id,
+          title: it.title,
+          price: it.price,
+          seller_name: it.seller_name,
+          institution: it.institution,
+          orders_count: oStat.count,
+          messages_count: mCount,
+          revenue: oStat.revenue,
+          photo: it.thumbnails?.[0] || it.photos?.[0] || '',
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.orders_count * 10 + b.messages_count - (a.orders_count * 10 + a.messages_count)
+      )
+      .slice(0, 8);
+
+    // Most Active Sellers
+    const sellerAgg = new Map<string, OwnerActiveSeller>();
+    for (const u of users) {
+      if (u.role === 'seller' || u.badges.includes('trader') || u.badges.includes('service_provider')) {
+        sellerAgg.set(u.id, {
+          id: u.id,
+          name: u.full_name,
+          phone: u.phone_number || '',
+          email: u.email || '',
+          shop_name: u.shop_name,
+          listings_count: 0,
+          orders_count: 0,
+          revenue: 0,
+        });
+      }
+    }
+    for (const it of items) {
+      const key = it.seller_id || it.seller_phone || it.seller_name;
+      const existing = sellerAgg.get(key) || {
+        id: key,
+        name: it.seller_name,
+        phone: it.seller_phone || '',
+        email: '',
+        shop_name: it.seller_shop_name,
+        listings_count: 0,
+        orders_count: 0,
+        revenue: 0,
+      };
+      existing.listings_count += 1;
+      sellerAgg.set(key, existing);
+    }
+    for (const o of orders) {
+      const key = o.seller_id || o.seller_phone || o.seller_name;
+      const existing = sellerAgg.get(key) || {
+        id: key,
+        name: o.seller_name,
+        phone: o.seller_phone || '',
+        email: '',
+        listings_count: 0,
+        orders_count: 0,
+        revenue: 0,
+      };
+      existing.orders_count += 1;
+      existing.revenue += o.product_price;
+      sellerAgg.set(key, existing);
+    }
+    const activeSellers = Array.from(sellerAgg.values())
+      .sort(
+        (a, b) =>
+          b.orders_count * 5 + b.listings_count - (a.orders_count * 5 + a.listings_count)
+      )
+      .slice(0, 8);
+
+    // Financial aggregations
+    const pendingPayments = orders.filter(
+      (o) => o.order_status === 'paid_escrow' || o.order_status === 'shipped'
+    );
+    const successfulPayments = orders.filter((o) => o.order_status === 'delivered_confirmed');
+    const failedPayments = orders.filter(
+      (o) =>
+        o.order_status === 'refund_requested' ||
+        o.order_status === 'refund_approved' ||
+        o.order_status === 'cancelled'
+    );
+
+    const totalSales = orders
+      .filter((o) => o.order_status !== 'cancelled' && o.order_status !== 'refund_approved')
+      .reduce((s, o) => s + o.total_amount, 0);
+    const totalAdminCommission = orders
+      .filter((o) => o.order_status !== 'cancelled' && o.order_status !== 'refund_approved')
+      .reduce((s, o) => s + o.admin_commission, 0);
     const totalDeliveryFees = orders.reduce((s, o) => s + o.delivery_fee, 0);
     const totalAdminKept = orders.reduce((s, o) => s + o.admin_total_kept, 0);
     const totalSellerPayouts = orders.reduce((s, o) => s + o.seller_payout, 0);
-    const escrowHeld = orders
-      .filter((o) => o.order_status === 'paid_escrow' || o.order_status === 'shipped')
+    const moneyToPaySellers = pendingPayments.reduce((s, o) => s + o.seller_payout, 0);
+    const moneyPaidToSellers = successfulPayments.reduce((s, o) => s + o.seller_payout, 0);
+    const refundedOut = orders
+      .filter((o) => o.order_status === 'refund_approved' || o.order_status === 'cancelled')
       .reduce((s, o) => s + o.total_amount, 0);
+    const totalMoneyOut = moneyPaidToSellers + refundedOut;
+    const escrowHeld = pendingPayments.reduce((s, o) => s + o.total_amount, 0);
 
     return {
       stats: {
@@ -2662,9 +2995,13 @@ export const api = {
         total_buyers: users.filter((u) => u.role === 'buyer').length,
         total_sellers: users.filter((u) => u.role === 'seller').length,
         total_items: items.filter((i) => i.status === 'active').length,
-        total_messages: msgsCountRes.count || 0,
+        total_all_items: items.length,
+        total_messages: rawMsgs.length,
         total_institutions: instStats.size,
         open_reports: reports.filter((r) => !r.resolved).length,
+        orders_today: ordersToday,
+        orders_week: ordersWeek,
+        orders_month: ordersMonth,
       },
       finance: {
         total_orders: orders.length,
@@ -2673,14 +3010,32 @@ export const api = {
         google_ads_earnings: Number(adRes.settings.google_ads_earnings || 0),
         promotion_fees_total: 0,
         escrow_held_amount: escrowHeld,
-        released_orders_count: orders.filter((o) => o.order_status === 'delivered_confirmed').length,
+        released_orders_count: successfulPayments.length,
         total_admin_commission: totalAdminCommission,
         total_delivery_fees: totalDeliveryFees,
         total_admin_kept: totalAdminKept,
         total_seller_payouts: totalSellerPayouts,
         pending_refunds_count: orders.filter((o) => o.order_status === 'refund_requested').length,
+        total_money_in: totalSales,
+        total_money_out: totalMoneyOut,
+        money_to_pay_sellers: moneyToPaySellers,
+        money_paid_to_sellers: moneyPaidToSellers,
+        pending_payments_count: pendingPayments.length,
+        pending_payments_amount: pendingPayments.reduce((s, o) => s + o.total_amount, 0),
+        successful_payments_count: successfulPayments.length,
+        successful_payments_amount: successfulPayments.reduce((s, o) => s + o.total_amount, 0),
+        failed_payments_count: failedPayments.length,
+        failed_payments_amount: failedPayments.reduce((s, o) => s + o.total_amount, 0),
+        commission_percent: commissionPercent,
       },
       orders,
+      sales_series_daily: Array.from(dailyMap.values()),
+      sales_series_weekly: salesSeriesWeekly,
+      popular_products: popularProducts,
+      active_sellers: activeSellers,
+      buyer_purchases: buyerPurchases,
+      seller_listings: sellerListings,
+      chat_threads: chatThreads,
       institutions: Array.from(instStats.values()),
       users,
       items,
@@ -2692,30 +3047,48 @@ export const api = {
 
   ownerFeatureItem: async (itemId: string, featured: boolean) => {
     const me = await getAuthenticatedUser();
-    if (me.role !== 'owner') throw new Error('Access denied');
-    await supabase.from('items').update({ is_featured: featured }).eq('id', itemId);
+    if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
+    const { error } = await supabase.from('items').update({ is_featured: featured }).eq('id', itemId);
+    if (error) throw new Error(error.message);
     return { ok: true };
+  },
+
+  ownerApproveRejectItem: async (itemId: string, decision: 'approve' | 'reject') => {
+    const me = await getAuthenticatedUser();
+    if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
+    const nextStatus = decision === 'approve' ? 'active' : 'rejected';
+    const { error } = await supabase.from('items').update({ status: nextStatus }).eq('id', itemId);
+    if (error) throw new Error(error.message);
+    return { ok: true, status: nextStatus };
   },
 
   ownerDeleteItem: async (itemId: string) => {
     const me = await getAuthenticatedUser();
-    if (me.role !== 'owner') throw new Error('Access denied');
-    await supabase.from('items').delete().eq('id', itemId);
+    if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
+    const { error } = await supabase.from('items').delete().eq('id', itemId);
+    if (error) throw new Error(error.message);
     return { ok: true };
   },
 
-  ownerBlockUser: async (phone: string, blocked: boolean) => {
+  ownerBlockUser: async (userIdOrPhone: string, blocked: boolean) => {
     const me = await getAuthenticatedUser();
-    if (me.role !== 'owner') throw new Error('Access denied');
-    await supabase.from('profiles').update({ blocked }).eq('phone_number', phone);
-    await supabase.from('users').update({ blocked }).eq('phone_number', phone).then(() => {});
+    if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
+    if (isUuid(userIdOrPhone)) {
+      await supabase.from('profiles').update({ blocked }).eq('id', userIdOrPhone);
+      await supabase.from('users').update({ blocked }).eq('id', userIdOrPhone).then(() => {});
+    } else {
+      const candidates = phoneLookupCandidates(userIdOrPhone);
+      await supabase.from('profiles').update({ blocked }).in('phone_number', candidates);
+      await supabase.from('users').update({ blocked }).in('phone_number', candidates).then(() => {});
+    }
     return { ok: true };
   },
 
   ownerResolveReport: async (reportId: string) => {
     const me = await getAuthenticatedUser();
-    if (me.role !== 'owner') throw new Error('Access denied');
-    await supabase.from('reports').update({ resolved: true }).eq('id', reportId);
+    if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
+    const { error } = await supabase.from('reports').update({ resolved: true }).eq('id', reportId);
+    if (error) throw new Error(error.message);
     return { ok: true };
   },
 
@@ -2775,13 +3148,17 @@ export const api = {
     delivery_tier?: 'same_city' | 'standard';
   }): Promise<{ order: EscrowOrder }> => {
     const me = await getAuthenticatedUser();
-    const item = await api.getItemDetail(payload.item_id);
+    const [item, settingsRes] = await Promise.all([
+      api.getItemDetail(payload.item_id),
+      api.getAdSettings(),
+    ]);
+    const commissionPercent = Number(settingsRes.settings.commission_percent ?? 10);
     const cfg = getCountryConfig(item.country || me.country || 'Nigeria');
     const deliveryFee =
       payload.delivery_tier === 'standard' ? cfg.deliveryFeeStandard : cfg.deliveryFeeSameCity;
     const productPrice = Number(item.price || 0);
     const totalAmount = productPrice + deliveryFee;
-    const adminCommission = Math.round(productPrice * 0.07);
+    const adminCommission = Math.round(productPrice * (commissionPercent / 100));
     const sellerPayout = productPrice - adminCommission;
     const adminTotalKept = adminCommission + deliveryFee;
 
@@ -2972,7 +3349,7 @@ export const api = {
     decision: 'approve_full' | 'approve_product_only' | 'reject'
   ): Promise<{ order: EscrowOrder }> => {
     const me = await getAuthenticatedUser();
-    if (me.role !== 'owner') throw new Error('Access denied');
+    if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
     const nextStatus = decision === 'reject' ? 'paid_escrow' : 'refund_approved';
     const { data, error } = await supabase
       .from('orders')
@@ -3010,8 +3387,8 @@ export const api = {
 
   ownerSaveAdSettings: async (settings: AdSettings): Promise<{ settings: AdSettings }> => {
     const me = await getAuthenticatedUser();
-    if (me.role !== 'owner') throw new Error('Access denied');
-    const payload = {
+    if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
+    const payload: AdSettings & { id: string } = {
       id: 'default',
       ads_enabled: Boolean(settings.ads_enabled),
       interstitial_enabled: false,
@@ -3024,6 +3401,10 @@ export const api = {
       paystack_public_key: settings.paystack_public_key || PAYSTACK_PUBLIC_KEY_PLACEHOLDER,
       paystack_split_code: settings.paystack_split_code || PAYSTACK_SPLIT_CODE_PLACEHOLDER,
       admin_subaccount_code: settings.admin_subaccount_code || '',
+      commission_percent: Math.max(0, Math.min(50, Number(settings.commission_percent ?? 10))),
+      site_name: (settings.site_name || 'Afri Student Mart').trim() || 'Afri Student Mart',
+      announcement: (settings.announcement || '').trim(),
+      announcement_enabled: Boolean(settings.announcement_enabled),
     };
     const { error } = await supabase.from('ad_settings').upsert(payload, { onConflict: 'id' });
     if (error) throw new Error(error.message);

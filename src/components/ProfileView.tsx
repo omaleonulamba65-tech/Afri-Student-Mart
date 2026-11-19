@@ -33,7 +33,7 @@ import {
   getCountryDisplayName,
 } from '../data/languages';
 import { EXACT_SAFETY_MESSAGES } from '../data/policies';
-import { api, buildWhatsAppShareUrl, compressImageFile } from '../lib/api';
+import { api, buildWhatsAppShareUrl, compressImageFile, isVerifiedOwnerUser } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
 import { AFRICAN_PAYOUT_BANKS } from '../lib/paystack';
 import {
@@ -197,7 +197,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     );
   }
 
-  const isOwner = user.role === 'owner';
+  const isOwner = isVerifiedOwnerUser(user);
   const isTrader = user.badges?.includes('trader');
   const isServiceProvider = user.badges?.includes('service_provider');
   const isStudent = !isTrader && !isServiceProvider;

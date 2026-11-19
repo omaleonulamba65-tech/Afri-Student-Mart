@@ -11,7 +11,7 @@ import {
   User,
   X,
 } from 'lucide-react';
-import { api, formatNaira, formatTimeAgo } from '../lib/api';
+import { api, formatNaira, formatTimeAgo, isVerifiedOwnerUser } from '../lib/api';
 import type { AdSettings, PublicUser, ServiceProvider } from '../types';
 import { BadgeRow } from './BadgePill';
 import { PaystackFeeModal, PaystackFeeRequest } from './PaystackFeeModal';
@@ -55,7 +55,7 @@ export const ServiceProfileModal: React.FC<ServiceProfileModalProps> = ({
   if (!service) return null;
 
   const isOwnerOrProvider =
-    user && (user.id === service.provider_id || user.role === 'owner');
+    user && (user.id === service.provider_id || isVerifiedOwnerUser(user));
 
   const handleBook = async (e: React.FormEvent) => {
     e.preventDefault();

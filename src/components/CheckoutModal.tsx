@@ -90,7 +90,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     deliveryTier === 'same_city' ? countryCfg.deliveryFeeSameCity : countryCfg.deliveryFeeStandard;
   const totalAmount = productPrice + deliveryFee;
   const amountKobo = Math.round(totalAmount * 100);
-  const adminCommissionPreview = Math.round(productPrice * 0.07);
+  const rawCommission = Number(adSettings?.commission_percent);
+  const commissionPercent =
+    Number.isFinite(rawCommission) && rawCommission >= 0 && rawCommission <= 30
+      ? rawCommission
+      : 10;
+  const sellerPercent = Math.max(0, 100 - commissionPercent);
+  const adminCommissionPreview = Math.round(productPrice * (commissionPercent / 100));
   const sellerPayoutPreview = productPrice - adminCommissionPreview;
   const adminTotalKeptPreview = adminCommissionPreview + deliveryFee;
   const thumb = primaryItem.thumbnails?.[0] || primaryItem.photos?.[0] || '';
@@ -250,7 +256,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </span>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-slate-600">Split (7% + Delivery Fee / 93%)</span>
+                <span className="text-slate-600">
+                  Split ({commissionPercent}% + Delivery Fee / {sellerPercent}%)
+                </span>
                 <span className="font-bold text-green-900 tabular-nums">
                   Admin {formatMoney(adminTotalKeptPreview, completedOrder.country || itemCountry)} · Seller{' '}
                   {formatMoney(sellerPayoutPreview, completedOrder.country || itemCountry)}
@@ -453,7 +461,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-600 pt-1">
-                Owner keeps 7% + Delivery Fee ({formatMoney(adminTotalKeptPreview, itemCountry)}) · Seller gets 93% ({formatMoney(sellerPayoutPreview, itemCountry)}) when you confirm delivery.
+                Owner keeps {commissionPercent}% + Delivery Fee ({formatMoney(adminTotalKeptPreview, itemCountry)}) · Seller gets {sellerPercent}% ({formatMoney(sellerPayoutPreview, itemCountry)}) when you confirm delivery.
               </p>
             </div>
 
@@ -519,7 +527,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <span className="font-mono text-[11px] truncate max-w-[58%]">{cfg.publicKey}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Split (Owner 7%+Del / Seller 93%)</span>
+                    <span>
+                      Split (Owner {commissionPercent}%+Del / Seller {sellerPercent}%)
+                    </span>
                     <span className="font-bold text-green-800 tabular-nums">
                       Owner {formatMoney(adminTotalKeptPreview, itemCountry)} / Seller{' '}
                       {formatMoney(sellerPayoutPreview, itemCountry)}

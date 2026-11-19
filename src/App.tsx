@@ -40,6 +40,7 @@ import { getMarketsByCountry } from './data/markets';
 import {
   api,
   getLowDataMode,
+  isVerifiedOwnerUser,
   setLowDataMode as persistLowDataMode,
   setStoredToken,
 } from './lib/api';
@@ -81,8 +82,8 @@ const MarketsView = lazy(() =>
 const MessagesView = lazy(() =>
   import('./components/MessagesView').then((m) => ({ default: m.MessagesView }))
 );
-const OwnerDashboardView = lazy(() =>
-  import('./components/OwnerDashboardView').then((m) => ({ default: m.OwnerDashboardView }))
+const OwnerPortalPage = lazy(() =>
+  import('./components/OwnerPortalPage').then((m) => ({ default: m.OwnerPortalPage }))
 );
 const PolicyModal = lazy(() =>
   import('./components/PolicyModal').then((m) => ({ default: m.PolicyModal }))
@@ -173,9 +174,33 @@ export default function App() {
   } = useI18n();
 
   const [user, setUser] = useState<PublicUser | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [routePath, setRoutePath] = useState<string>(() =>
+    typeof window !== 'undefined' ? window.location.pathname : '/'
+  );
   const [activeTab, setActiveTab] = useState<NavTab>('home');
-  const [showOwnerDashboard, setShowOwnerDashboard] = useState(false);
   const [langModalOpen, setLangModalOpen] = useState(false);
+
+  const isOwnerRoute = routePath.replace(/\/+$/, '') === '/owner-dashboard';
+
+  const navigateTo = useCallback((path: string, replace = false) => {
+    if (typeof window !== 'undefined') {
+      if (replace) {
+        window.history.replaceState({}, '', path);
+      } else {
+        window.history.pushState({}, '', path);
+      }
+    }
+    setRoutePath(path);
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setRoutePath(window.location.pathname);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   // Live Supabase feed + 10-per-page pagination
   const [items, setItems] = useState<MarketplaceItem[]>([]);
@@ -274,6 +299,10 @@ export default function App() {
     paystack_public_key: '',
     paystack_split_code: '',
     admin_subaccount_code: '',
+    commission_percent: 10,
+    site_name: 'Afri Student Mart',
+    announcement: '',
+    announcement_enabled: false,
   });
 
   const [toast, setToast] = useState('');
@@ -400,9 +429,6 @@ export default function App() {
       .then((res) => {
         if (res?.user) {
           setUser(res.user);
-          if (res.user.role === 'owner') {
-            setShowOwnerDashboard(true);
-          }
           refreshUnread();
           fetchWishlist();
         } else {
@@ -411,6 +437,9 @@ export default function App() {
       })
       .catch(() => {
         setStoredToken(null);
+      })
+      .finally(() => {
+        setAuthReady(true);
       });
     const adTimer = setTimeout(() => {
       api
@@ -422,6 +451,14 @@ export default function App() {
     }, 300);
     return () => clearTimeout(adTimer);
   }, [fetchHotDeals]);
+
+  // Sync browser document title with configured site name
+  useEffect(() => {
+    const cleanName = (adSettings.site_name || '').trim() || 'Afri Student Mart';
+    document.title = isOwnerRoute
+      ? `Owner Dashboard · ${cleanName}`
+      : `${cleanName} — West & South Africa Student Marketplace`;
+  }, [adSettings.site_name, isOwnerRoute]);
 
   // Re-fetch page 1 whenever filters/debounced search change
   useEffect(() => {
@@ -767,7 +804,6 @@ export default function App() {
   const handleLogout = () => {
     void api.logout();
     setUser(null);
-    setShowOwnerDashboard(false);
     setCartCheckoutActive(false);
     setUnreadCount(0);
     setWishlistIds([]);
@@ -805,6 +841,50 @@ export default function App() {
     };
   }, [orderedFeed, userHomeSchool]);
 
+  if (isOwnerRoute) {
+    return (
+      <>
+        {toast && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md rounded-xl bg-green-900 text-white px-4 py-3 text-sm font-semibold shadow-lg flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <CheckCircle2 className="w-4 h-4 text-orange-400 shrink-0" />
+              <span className="truncate">{toast}</span>
+            </div>
+            <button type="button" onClick={() => setToast('')} className="shrink-0 text-green-200">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+        <Suspense fallback={<TabFallback />}>
+          <OwnerPortalPage
+            user={user}
+            authReady={authReady}
+            onAuthenticated={(token, owner) => {
+              setStoredToken(token);
+              setUser(owner);
+              refreshUnread();
+              fetchWishlist();
+              showToast('Welcome back, Owner.');
+            }}
+            onLogout={() => {
+              handleLogout();
+              navigateTo('/', true);
+            }}
+            onRedirectDenied={() => {
+              navigateTo('/', true);
+              showToast('Access Denied');
+            }}
+            onExitToStorefront={() => {
+              navigateTo('/');
+              setActiveTab('home');
+            }}
+            onAdsUpdated={(s) => setAdSettings(s)}
+          />
+        </Suspense>
+      </>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-white text-slate-900">
       {/* Top Bar — Fast Solid Header + Low Data Mode Button */}
@@ -813,12 +893,11 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setShowOwnerDashboard(false);
               setActiveTab('home');
             }}
             className="text-left shrink-0 focus:outline-none"
           >
-            <BrandLogo size="sm" compact />
+            <BrandLogo size="sm" compact siteName={adSettings.site_name} />
           </button>
 
           {/* Desktop Navigation */}
@@ -838,11 +917,10 @@ export default function App() {
                 key={tab}
                 type="button"
                 onClick={() => {
-                  setShowOwnerDashboard(false);
                   setActiveTab(tab);
                 }}
                 className={`whitespace-nowrap shrink-0 hover:text-green-800 flex items-center gap-1.5 ${
-                  !showOwnerDashboard && activeTab === tab
+                  activeTab === tab
                     ? 'text-green-800 underline underline-offset-4 font-extrabold'
                     : ''
                 }`}
@@ -873,11 +951,10 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
-                setShowOwnerDashboard(false);
                 setActiveTab('markets');
               }}
               className={`md:hidden min-h-[38px] px-2.5 rounded-xl border text-xs font-extrabold inline-flex items-center gap-1 whitespace-nowrap ${
-                !showOwnerDashboard && activeTab === 'markets'
+                activeTab === 'markets'
                   ? 'border-green-700 bg-green-700 text-white'
                   : 'border-green-700/30 bg-green-50 text-green-900'
               }`}
@@ -935,7 +1012,6 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => {
-                  setShowOwnerDashboard(false);
                   setActiveTab('post');
                 }}
                 className="min-h-[38px] sm:min-h-[42px] px-3 sm:px-4 rounded-xl bg-green-700 text-white text-xs sm:text-sm font-bold hover:bg-green-800 whitespace-nowrap shrink-0"
@@ -971,17 +1047,16 @@ export default function App() {
         </div>
       )}
 
+      {/* Storefront Sitewide Announcement Banner (configured from Owner Settings) */}
+      {adSettings.announcement_enabled && adSettings.announcement?.trim() && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-xs sm:text-sm font-bold text-amber-950">
+          {adSettings.announcement.trim()}
+        </div>
+      )}
+
       {/* Main Content */}
       <main className="flex-1 mx-auto w-full max-w-7xl px-3.5 sm:px-6 pt-4 pb-24 md:pb-12">
-        {showOwnerDashboard && user?.role === 'owner' ? (
-          <Suspense fallback={<TabFallback />}>
-            <OwnerDashboardView
-              onBack={() => setShowOwnerDashboard(false)}
-              onAdsUpdated={(s) => setAdSettings(s)}
-            />
-          </Suspense>
-        ) : (
-          <div className="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
+        <div className="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
             <div className="lg:col-span-9 min-w-0">
               {/* === HOME TAB === */}
               {activeTab === 'home' && (
@@ -1677,12 +1752,13 @@ export default function App() {
                   onUserUpdated={(u) => setUser(u)}
                   onLogout={handleLogout}
                   onOpenOwnerDashboard={() => {
-                    if (user?.role === 'owner') {
-                      setShowOwnerDashboard(true);
+                    if (isVerifiedOwnerUser(user)) {
+                      navigateTo('/owner-dashboard');
+                    } else {
+                      showToast('Access Denied');
                     }
                   }}
                   onNavigateTab={(tab) => {
-                    setShowOwnerDashboard(false);
                     setActiveTab(tab);
                   }}
                   onViewItem={(it) => setDetailItem(it)}
@@ -1706,14 +1782,13 @@ export default function App() {
               )}
             </aside>
           </div>
-        )}
       </main>
 
       {/* Footer on Every Page */}
       <footer className="border-t border-slate-200 bg-slate-50 pb-20 md:pb-8">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8 space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <BrandLogo size="sm" />
+            <BrandLogo size="sm" siteName={adSettings.site_name} />
             <div className="text-xs sm:text-sm font-semibold text-slate-700">
               {t('support_line')}:{' '}
               <a
@@ -1767,7 +1842,6 @@ export default function App() {
         activeTab={activeTab}
         unreadCount={unreadCount}
         onChangeTab={(tab) => {
-          setShowOwnerDashboard(false);
           setActiveTab(tab);
         }}
       />
@@ -1842,13 +1916,8 @@ export default function App() {
               if (loggedInUser.country && loggedInUser.language) {
                 setCountryAndLanguage(loggedInUser.country, loggedInUser.language, true);
               }
-              if (loggedInUser.role === 'owner') {
-                setShowOwnerDashboard(true);
-              } else {
-                setShowOwnerDashboard(false);
-                if (isNewSignup) {
-                  setActiveTab('profile');
-                }
+              if (isNewSignup) {
+                setActiveTab('profile');
               }
               refreshUnread();
               fetchWishlist();

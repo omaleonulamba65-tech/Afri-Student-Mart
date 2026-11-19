@@ -4,6 +4,7 @@ interface LogoProps {
   compact?: boolean;
   showPoweredBy?: boolean;
   size?: 'sm' | 'md' | 'lg';
+  siteName?: string;
 }
 
 export const LogoIcon: React.FC<{ className?: string }> = ({ className = 'w-10 h-10' }) => (
@@ -42,16 +43,18 @@ export const BrandLogo: React.FC<LogoProps> = ({
   compact = false,
   showPoweredBy = true,
   size = 'md',
+  siteName,
 }) => {
   const iconSize = size === 'sm' ? 'w-8 h-8' : size === 'lg' ? 'w-14 h-14' : 'w-10 h-10';
   const titleSize = size === 'sm' ? 'text-base' : size === 'lg' ? 'text-2xl' : 'text-lg';
+  const resolvedName = (siteName || '').trim() || 'Afri Student Mart';
 
   return (
     <div className="inline-flex items-center gap-2.5 shrink-0">
       <LogoIcon className={iconSize} />
       <div className="flex flex-col leading-none">
         <span className={`${titleSize} font-extrabold tracking-tight text-green-900 whitespace-nowrap`}>
-          Afri Student Mart
+          {resolvedName}
         </span>
         {!compact && showPoweredBy && (
           <span className="mt-1 text-[10px] font-bold tracking-wider uppercase text-amber-500 whitespace-nowrap">
