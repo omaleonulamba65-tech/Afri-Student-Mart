@@ -10,6 +10,7 @@ import {
   Heart,
   LogOut,
   PackageCheck,
+  QrCode,
   Radio,
   Rocket,
   Share2,
@@ -66,6 +67,7 @@ interface ProfileViewProps {
   onOpenOwnerDashboard: () => void;
   onNavigateTab?: (tab: NavTab) => void;
   onViewItem: (item: MarketplaceItem) => void;
+  onShowQr?: (item: MarketplaceItem) => void;
   onNotice: (msg: string) => void;
 }
 
@@ -80,6 +82,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onOpenOwnerDashboard,
   onNavigateTab,
   onViewItem,
+  onShowQr,
   onNotice,
 }) => {
   const { country, language, countryConfig, setCountryAndLanguage, formatMoney, t } = useI18n();
@@ -1236,8 +1239,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 Trust {(user.trust_score || 5.0).toFixed(1)} ({user.reviews_count || 0})
               </span>
             </div>
-            <BadgeRow badges={user.badges} size="sm" />
-            <p className="text-xs font-semibold text-green-800 truncate">{user.institution}</p>
+            <BadgeRow badges={user.badges} size="sm" userType={user.user_type} />
+            <p className="text-xs font-semibold text-green-800 truncate">
+              {user.institution || user.campus || user.state}
+            </p>
             <p className="text-xs font-bold text-slate-700 inline-flex items-center gap-1.5">
               <span className="text-xl leading-none" aria-hidden="true">
                 {(user.country ? getCountryConfig(user.country) : getCountryByDialCode(user.country_code)).flag}
@@ -1797,6 +1802,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   >
                     <Rocket className="w-3.5 h-3.5" />
                     <span>{boostingId === it.id ? '...' : 'Boost ₦500'}</span>
+                  </button>
+                )}
+                {onShowQr && (
+                  <button
+                    type="button"
+                    onClick={() => onShowQr(it)}
+                    title="Generate Product QR Code"
+                    aria-label={`Show QR code for ${it.title}`}
+                    className="min-h-[40px] px-2.5 rounded-xl border border-slate-300 bg-slate-50 text-slate-800 text-xs font-extrabold inline-flex items-center gap-1 hover:bg-green-50 hover:border-green-700 hover:text-green-800 shrink-0"
+                  >
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">QR</span>
                   </button>
                 )}
                 <button

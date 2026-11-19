@@ -45,6 +45,21 @@ export function resolveInitialRouteState(): {
   return { tab: 'home', authModal: null };
 }
 
+export function resolveInitialProductId(): string | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.pathname.match(/^\/product\/([^/]+)\/?$/i);
+  if (match && match[1]) {
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return match[1];
+    }
+  }
+  const params = new URLSearchParams(window.location.search);
+  const qId = params.get('product') || params.get('item');
+  return qId && qId.trim() ? qId.trim() : null;
+}
+
 export function tabToPath(tab: NavTab): string {
   switch (tab) {
     case 'markets':
@@ -87,7 +102,7 @@ export function getSeoForView(opts: {
     return {
       title: `${opts.detailItem.title} | Afri Student Mart - JOKEY PERKY GROUP`,
       description: `${opts.detailItem.title} in ${loc}. ${DEFAULT_SEO_DESCRIPTION}`,
-      path: tabToPath(opts.activeTab),
+      path: `/product/${encodeURIComponent(opts.detailItem.id)}`,
     };
   }
 

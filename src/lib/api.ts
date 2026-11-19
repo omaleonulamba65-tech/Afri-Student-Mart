@@ -82,13 +82,15 @@ export function formatCountryMoney(amount: number, country?: string): string {
 }
 
 export function buildWhatsAppShareUrl(item: {
+  id?: string;
   title: string;
   price: number;
   institution: string;
   location: string;
   country?: string;
 }): string {
-  const siteUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const siteUrl = item.id && origin ? `${origin}/product/${encodeURIComponent(item.id)}` : origin;
   const text = `Check out "${item.title}" for ${formatCountryMoney(item.price, item.country)} at ${item.institution} (${item.location}) on Afri Student Mart! ${siteUrl}`;
   return `https://wa.me/?text=${encodeURIComponent(text)}`;
 }
@@ -472,6 +474,17 @@ function mapDbRowToPublicUser(
     rawRole === 'owner' ? 'owner' : rawRole === 'seller' ? 'seller' : 'buyer';
 
   const rawUserType = String(row.user_type || meta.user_type || '');
+  const rawAccountType = String(row.account_type || meta.account_type || '');
+  const isEasyBuyer =
+    rawAccountType === 'buyer' ||
+    rawUserType === 'Buyer' ||
+    (rawRole === 'buyer' &&
+      rawAccountType !== 'student' &&
+      rawAccountType !== 'trader' &&
+      rawAccountType !== 'service_provider' &&
+      !row.institution &&
+      !meta.institution);
+
   const accountType: AccountBadge =
     row.account_type === 'trader' ||
     meta.account_type === 'trader' ||
@@ -483,21 +496,23 @@ function mapDbRowToPublicUser(
       ? 'service_provider'
       : 'student';
 
-  const userTypeLabel: PublicUser['user_type'] =
-    accountType === 'trader'
-      ? 'Trader'
-      : accountType === 'service_provider'
-      ? 'Service Provider'
-      : 'Student';
+  const userTypeLabel: PublicUser['user_type'] = isEasyBuyer
+    ? 'Buyer'
+    : accountType === 'trader'
+    ? 'Trader'
+    : accountType === 'service_provider'
+    ? 'Service Provider'
+    : 'Student';
 
   const badgesFromRow = parseJsonArray(row.badges) as AccountBadge[];
   const badgesFromMeta = Array.isArray(meta.badges) ? (meta.badges as AccountBadge[]) : [];
-  const badges: AccountBadge[] =
-    badgesFromRow.length > 0
-      ? badgesFromRow
-      : badgesFromMeta.length > 0
-      ? badgesFromMeta
-      : [accountType];
+  const badges: AccountBadge[] = isEasyBuyer
+    ? []
+    : badgesFromRow.length > 0
+    ? badgesFromRow
+    : badgesFromMeta.length > 0
+    ? badgesFromMeta
+    : [accountType];
 
   const ownerBusinessName =
     role === 'owner'
@@ -537,6 +552,9 @@ function mapDbRowToPublicUser(
     role,
     badges,
     institution: String(row.institution || meta.institution || ''),
+    student_id:
+      (typeof row.student_id === 'string' && row.student_id) ||
+      (typeof meta.student_id === 'string' ? meta.student_id : undefined),
     level: (typeof row.level === 'string' && row.level) || (typeof meta.level === 'string' ? meta.level : undefined),
     school_id_photo: typeof meta.school_id_photo === 'string' ? meta.school_id_photo : undefined,
     id_doc_type:
@@ -555,6 +573,9 @@ function mapDbRowToPublicUser(
       (typeof row.secondary_reg_number === 'string' && row.secondary_reg_number) ||
       (typeof meta.secondary_reg_number === 'string' ? meta.secondary_reg_number : undefined),
     shop_name: ownerBusinessName,
+    trader_products:
+      (typeof row.trader_products === 'string' && row.trader_products) ||
+      (typeof meta.trader_products === 'string' ? meta.trader_products : undefined),
     market:
       (typeof row.market === 'string' && row.market) ||
       (typeof meta.market === 'string' ? meta.market : undefined),
@@ -562,6 +583,9 @@ function mapDbRowToPublicUser(
     service_category:
       (typeof row.service_category === 'string' && row.service_category) ||
       (typeof meta.service_category === 'string' ? meta.service_category : undefined),
+    service_details:
+      (typeof row.service_details === 'string' && row.service_details) ||
+      (typeof meta.service_details === 'string' ? meta.service_details : undefined),
     price_from:
       typeof row.price_from === 'number'
         ? row.price_from
@@ -696,11 +720,15 @@ async function syncUserProfileRow(
 
   const roleVal = isOwnerMetaOrTable
     ? 'owner'
-    : meta.account_type === 'trader' || meta.account_type === 'service_provider' || meta.role === 'seller'
+    : meta.account_type === 'trader' ||
+      meta.account_type === 'service_provider' ||
+      meta.role === 'seller'
     ? 'seller'
     : 'buyer';
   const userType =
-    meta.account_type === 'trader'
+    meta.account_type === 'buyer' || meta.user_type === 'Buyer'
+      ? 'Buyer'
+      : meta.account_type === 'trader'
       ? 'Trader'
       : meta.account_type === 'service_provider'
       ? 'Service Provider'
@@ -742,9 +770,13 @@ async function syncUserProfileRow(
       language_of_preference: langPrefVal,
       language: langPrefVal,
       user_type: userType,
-      account_type: String(meta.account_type || 'student'),
+      account_type: String(meta.account_type || 'buyer'),
       role: roleVal,
-      badges: Array.isArray(meta.badges) ? meta.badges : [String(meta.account_type || 'student')],
+      badges: Array.isArray(meta.badges)
+        ? meta.badges
+        : userType === 'Buyer'
+        ? []
+        : [String(meta.account_type || 'student')],
       institution: String(meta.institution || ''),
       campus: String(meta.campus || ''),
       level: String(meta.level || ''),
@@ -1020,15 +1052,18 @@ export const api = {
     phone_number: string;
     country_code: string;
     password: string;
-    account_type: AccountBadge;
+    account_type: AccountBadge | 'buyer';
     role: 'buyer' | 'seller';
-    institution: string;
+    institution?: string;
+    student_id?: string;
     level?: string;
     school_id_photo?: string;
     shop_name?: string;
+    trader_products?: string;
     market?: string;
     shop_doc_photo?: string;
     service_category?: string;
+    service_details?: string;
     price_from?: number;
     work_photos?: string[];
     state: string;
@@ -1049,12 +1084,18 @@ export const api = {
     const normalizedPhone = normalizePhoneDigits(payload.country_code, payload.phone_number);
     const email = (payload.email || '').trim().toLowerCase();
     if (!email || !email.includes('@')) {
-      throw new Error('Please enter a valid Email Address for Supabase Auth.');
+      throw new Error('Please enter a valid Email Address for login & order receipts.');
     }
-    const derivedRole: 'buyer' | 'seller' =
-      payload.account_type === 'trader' || payload.account_type === 'service_provider'
-        ? 'seller'
-        : payload.role;
+    const isBuyer = payload.account_type === 'buyer' || payload.role === 'buyer';
+    const derivedRole: 'buyer' | 'seller' = isBuyer ? 'buyer' : 'seller';
+    const derivedUserType: PublicUser['user_type'] =
+      payload.account_type === 'buyer'
+        ? 'Buyer'
+        : payload.account_type === 'trader'
+        ? 'Trader'
+        : payload.account_type === 'service_provider'
+        ? 'Service Provider'
+        : 'Student';
 
     const userMeta = {
       full_name: payload.full_name.trim(),
@@ -1064,18 +1105,22 @@ export const api = {
       country: payload.country || 'Nigeria',
       language: payload.language || 'English',
       account_type: payload.account_type,
+      user_type: derivedUserType,
       role: derivedRole,
-      badges: [payload.account_type],
-      institution: payload.institution,
+      badges: payload.account_type === 'buyer' ? [] : [payload.account_type],
+      institution: payload.institution || '',
+      student_id: payload.student_id,
       level: payload.level,
       id_doc_type: payload.id_doc_type,
-      id_doc_number: payload.id_doc_number,
+      id_doc_number: payload.id_doc_number || payload.student_id,
       business_reg_type: payload.business_reg_type,
       business_reg_number: payload.business_reg_number,
       secondary_reg_number: payload.secondary_reg_number,
       shop_name: payload.shop_name,
+      trader_products: payload.trader_products,
       market: payload.market,
       service_category: payload.service_category,
+      service_details: payload.service_details,
       price_from: payload.price_from,
       state: payload.state,
       campus: payload.campus,
@@ -1102,6 +1147,27 @@ export const api = {
     const publicUser = mapDbRowToPublicUser(dbRow || {}, data.user);
     if (data.session?.access_token) {
       setStoredToken(data.session.access_token);
+    }
+    try {
+      localStorage.setItem(
+        'afri_mart_ai_user_context',
+        JSON.stringify({
+          id: publicUser.id,
+          name: publicUser.full_name,
+          user_type: publicUser.user_type || derivedUserType,
+          role: publicUser.role,
+          school: publicUser.institution || undefined,
+          student_id: publicUser.student_id || publicUser.id_doc_number || undefined,
+          business_name: publicUser.shop_name || undefined,
+          products: publicUser.trader_products || undefined,
+          service_type: publicUser.service_category || undefined,
+          service_details: publicUser.service_details || undefined,
+          area: publicUser.campus || publicUser.market || publicUser.state || undefined,
+        })
+      );
+      window.dispatchEvent(new CustomEvent('afri-ai-user-context-updated'));
+    } catch {
+      // Ignore storage errors
     }
 
     return {
@@ -1207,6 +1273,11 @@ export const api = {
 
   logout: async () => {
     setStoredToken(null);
+    try {
+      localStorage.removeItem('afri_mart_ai_user_context');
+    } catch {
+      // Ignore storage errors
+    }
     await supabase.auth.signOut().catch(() => {});
   },
 

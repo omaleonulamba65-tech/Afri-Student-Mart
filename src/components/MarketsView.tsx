@@ -28,6 +28,7 @@ interface MarketsViewProps {
   onAddToCart?: (item: MarketplaceItem) => void;
   onChat: (item: MarketplaceItem) => void;
   onReport: (item: MarketplaceItem) => void;
+  onShowQr?: (item: MarketplaceItem) => void;
   onPostItem: () => void;
   onOpenShops: () => void;
 }
@@ -41,6 +42,7 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
   onAddToCart,
   onChat,
   onReport,
+  onShowQr,
   onPostItem,
   onOpenShops,
 }) => {
@@ -290,6 +292,7 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
                   onAddToCart={onAddToCart}
                   onChat={onChat}
                   onReport={onReport}
+                  onShowQr={onShowQr}
                 />
               ))}
             </div>

@@ -1,11 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Ban,
   Check,
+  Loader2,
   MessageCircle,
+  Mic,
   Send,
   ShieldCheck,
+  Square,
   Tag,
   User,
   X,
@@ -13,6 +16,11 @@ import {
 import { api, formatTimeAgo } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
 import { supabase } from '../lib/supabaseClient';
+import {
+  formatVoiceSeconds,
+  pickSupportedAudioMimeType,
+  transcribeVoiceBlob,
+} from '../lib/voiceRecorder';
 import type {
   ChatMessage,
   ChatThread,
@@ -36,7 +44,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   onRequireAuth,
   onUnreadCountChange,
 }) => {
-  const { formatMoney, t } = useI18n();
+  const { formatMoney, language, t } = useI18n();
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [loadingThreads, setLoadingThreads] = useState(false);
 
@@ -47,6 +55,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordSecs, setRecordSecs] = useState(0);
+  const [transcribing, setTranscribing] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -56,6 +67,125 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [offerBusyId, setOfferBusyId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
+  const recordTimerRef = useRef<number | null>(null);
+  const cancelRecordRef = useRef(false);
+
+  const cleanupRecording = useCallback(() => {
+    if (recordTimerRef.current !== null) {
+      window.clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((tr) => tr.stop());
+      mediaStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+    audioChunksRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      cancelRecordRef.current = true;
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {
+          // Ignore
+        }
+      }
+      cleanupRecording();
+    };
+  }, [cleanupRecording]);
+
+  const startVoiceNote = async () => {
+    if (recording || transcribing || sending) return;
+    setError('');
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === 'undefined'
+    ) {
+      setError('Voice recording is not supported on this browser.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = pickSupportedAudioMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+      cancelRecordRef.current = false;
+
+      recorder.ondataavailable = (evt) => {
+        if (evt.data && evt.data.size > 0) audioChunksRef.current.push(evt.data);
+      };
+
+      recorder.onstop = async () => {
+        const cancelled = cancelRecordRef.current;
+        const chunks = [...audioChunksRef.current];
+        const recordedType = recorder.mimeType || mimeType || 'audio/webm';
+        cleanupRecording();
+        setRecording(false);
+        setRecordSecs(0);
+
+        if (cancelled || chunks.length === 0) return;
+
+        const blob = new Blob(chunks, { type: recordedType });
+        setTranscribing(true);
+        try {
+          const { transcript } = await transcribeVoiceBlob(blob, language);
+          setDraft((prev) => (prev ? `${prev} ${transcript}` : transcript));
+          setNotice('Voice transcribed! Review and tap Send.');
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Could not transcribe voice recording.');
+        } finally {
+          setTranscribing(false);
+        }
+      };
+
+      recorder.start(250);
+      setRecording(true);
+      setRecordSecs(0);
+      recordTimerRef.current = window.setInterval(() => {
+        setRecordSecs((prev) => {
+          const next = prev + 1;
+          if (next >= 45 && mediaRecorderRef.current?.state === 'recording') {
+            mediaRecorderRef.current.stop();
+          }
+          return next;
+        });
+      }, 1000);
+    } catch {
+      cleanupRecording();
+      setRecording(false);
+      setError('Microphone permission denied. Enable microphone access to record voice.');
+    }
+  };
+
+  const stopVoiceNote = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      cancelRecordRef.current = false;
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const cancelVoiceNote = () => {
+    cancelRecordRef.current = true;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    } else {
+      cleanupRecording();
+      setRecording(false);
+      setRecordSecs(0);
+    }
+  };
 
   const loadThreads = async () => {
     if (!user) return;
@@ -478,23 +608,64 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         </div>
 
         {/* Composer */}
-        <form onSubmit={handleSend} className="border-t border-slate-200 bg-white p-3 flex items-center gap-2">
-          <input
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={t('type_message')}
-            className="flex-1 min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={sending || !draft.trim()}
-            className="min-h-[48px] min-w-[52px] rounded-xl bg-green-700 text-white flex items-center justify-center hover:bg-green-800 disabled:opacity-50"
-            aria-label="Send message"
-          >
-            <Send className="w-5 h-5" />
-          </button>
-        </form>
+        {recording ? (
+          <div className="border-t border-red-200 bg-red-50 p-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-red-600 animate-pulse shrink-0" />
+              <span className="text-sm font-extrabold text-red-700 tabular-nums">
+                {formatVoiceSeconds(recordSecs)}
+              </span>
+              <span className="text-sm font-semibold text-slate-700">Recording voice...</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={cancelVoiceNote}
+                className="min-h-[44px] px-3 rounded-xl border border-slate-300 bg-white text-slate-700 text-xs font-bold hover:bg-slate-100 inline-flex items-center gap-1"
+              >
+                <X className="w-4 h-4" />
+                <span>Cancel</span>
+              </button>
+              <button
+                type="button"
+                onClick={stopVoiceNote}
+                className="min-h-[44px] px-4 rounded-xl bg-green-700 text-white text-xs font-extrabold hover:bg-green-800 inline-flex items-center gap-1.5"
+              >
+                <Square className="w-3.5 h-3.5 fill-white" />
+                <span>Transcribe</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSend} className="border-t border-slate-200 bg-white p-3 flex items-center gap-2">
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={transcribing ? 'Transcribing voice...' : t('type_message')}
+              disabled={transcribing}
+              className="flex-1 min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={startVoiceNote}
+              disabled={sending || transcribing}
+              title="Record voice message"
+              aria-label="Record voice message"
+              className="min-h-[48px] min-w-[48px] rounded-xl border border-slate-300 bg-slate-50 text-slate-700 flex items-center justify-center hover:bg-green-50 hover:text-green-800 hover:border-green-700 disabled:opacity-50"
+            >
+              {transcribing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Mic className="w-5 h-5" />}
+            </button>
+            <button
+              type="submit"
+              disabled={sending || transcribing || !draft.trim()}
+              className="min-h-[48px] min-w-[52px] rounded-xl bg-green-700 text-white flex items-center justify-center hover:bg-green-800 disabled:opacity-50"
+              aria-label="Send message"
+            >
+              <Send className="w-5 h-5" />
+            </button>
+          </form>
+        )}
       </div>
     );
   }

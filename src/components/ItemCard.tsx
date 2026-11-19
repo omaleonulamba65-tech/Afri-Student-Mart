@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Flag, Heart, MessageCircle, Rocket, ShoppingBag, ShoppingCart, Star, Video } from 'lucide-react';
+import { Flag, Heart, MessageCircle, QrCode, Rocket, ShoppingBag, ShoppingCart, Star, Video } from 'lucide-react';
 import {
   getCountryByDialCode,
   getCountryConfig,
@@ -20,6 +20,7 @@ interface ItemCardProps {
   onAddToCart?: (item: MarketplaceItem) => void;
   onChat: (item: MarketplaceItem) => void;
   onReport: (item: MarketplaceItem) => void;
+  onShowQr?: (item: MarketplaceItem) => void;
 }
 
 export const ItemCard: React.FC<ItemCardProps> = ({
@@ -32,6 +33,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
   onAddToCart,
   onChat,
   onReport,
+  onShowQr,
 }) => {
   const { formatMoney, t } = useI18n();
   const [imgError, setImgError] = useState(false);
@@ -213,6 +215,17 @@ export const ItemCard: React.FC<ItemCardProps> = ({
             <MessageCircle className="w-3.5 h-3.5 shrink-0" />
             <span>{t('chat')}</span>
           </button>
+          {onShowQr && (
+            <button
+              type="button"
+              onClick={() => onShowQr(item)}
+              title="Product QR Code"
+              aria-label={`Generate QR code for ${item.title}`}
+              className="min-h-[44px] min-w-[44px] rounded-xl border border-slate-300 bg-slate-50 text-slate-700 hover:bg-green-50 hover:text-green-800 hover:border-green-700 flex items-center justify-center shrink-0"
+            >
+              <QrCode className="w-4 h-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onReport(item)}

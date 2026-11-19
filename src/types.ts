@@ -75,10 +75,11 @@ export interface PublicUser {
   state_city?: string;
   language_of_preference?: string;
   language?: string;
-  user_type?: 'Student' | 'Trader' | 'Service Provider';
+  user_type?: 'Buyer' | 'Student' | 'Trader' | 'Service Provider';
   role: UserRole;
   badges: AccountBadge[]; // Up to 2 badges e.g. ['student', 'service_provider']
   institution: string;
+  student_id?: string;
   level?: string;
   school_id_photo?: string;
   id_doc_type?: string;
@@ -87,9 +88,11 @@ export interface PublicUser {
   business_reg_number?: string;
   secondary_reg_number?: string;
   shop_name?: string;
+  trader_products?: string;
   market?: string;
   shop_doc_photo?: string;
   service_category?: string;
+  service_details?: string;
   price_from?: number;
   work_photos?: string[];
   state: string;

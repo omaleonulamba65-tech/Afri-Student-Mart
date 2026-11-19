@@ -11,6 +11,7 @@ import {
   MapPin,
   MessageCircle,
   PackageCheck,
+  QrCode,
   Share2,
   ShieldAlert,
   ShoppingCart,
@@ -47,6 +48,7 @@ interface ItemDetailModalProps {
   onChat: (item: MarketplaceItem, prefillMessage?: string) => void;
   onReportItem: (item: MarketplaceItem) => void;
   onBlockSeller: (item: MarketplaceItem) => void;
+  onShowQr?: (item: MarketplaceItem) => void;
 }
 
 export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
@@ -60,6 +62,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
   onChat,
   onReportItem,
   onBlockSeller,
+  onShowQr,
 }) => {
   const { formatMoney, t } = useI18n();
   const [fullItem, setFullItem] = useState<MarketplaceItem | null>(null);
@@ -268,6 +271,17 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
             {activeItem.category}
           </span>
           <div className="flex items-center gap-1">
+            {onShowQr && (
+              <button
+                type="button"
+                onClick={() => onShowQr(activeItem)}
+                aria-label="Show product QR code"
+                title="Product QR Code"
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-700 hover:bg-green-50 hover:text-green-800"
+              >
+                <QrCode className="w-5 h-5" />
+              </button>
+            )}
             {onToggleWishlist && (
               <button
                 type="button"
@@ -422,8 +436,8 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
             </div>
           </div>
 
-          {/* Primary Action Buttons: Buy Now (Paystack), Add to Cart, Make Offer, Share WhatsApp, Report Scam */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+          {/* Primary Action Buttons: Buy Now (Paystack), Add to Cart, Make Offer, Share WhatsApp, QR Code, Report Scam */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
             <button
               type="button"
               onClick={() => onBuyNow(activeItem)}
@@ -464,6 +478,16 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
               <Share2 className="w-4 h-4 shrink-0" />
               <span>Share WhatsApp</span>
             </a>
+            {onShowQr && (
+              <button
+                type="button"
+                onClick={() => onShowQr(activeItem)}
+                className="min-h-[48px] rounded-xl border border-slate-300 bg-slate-50 text-slate-900 font-bold text-sm px-3 flex items-center justify-center gap-1.5 hover:bg-green-50 hover:border-green-700 hover:text-green-900"
+              >
+                <QrCode className="w-4 h-4 shrink-0" />
+                <span>QR Code</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onReportItem(activeItem)}

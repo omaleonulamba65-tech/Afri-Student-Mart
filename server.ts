@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, type GenerateContentResponse } from '@google/genai';
 import {
   OWNER_PHONE,
   addRating,
@@ -177,6 +177,7 @@ async function startServer() {
         account_type,
         role,
         institution,
+        student_id,
         level,
         school_id_photo,
         id_doc_type,
@@ -185,9 +186,11 @@ async function startServer() {
         business_reg_number,
         secondary_reg_number,
         shop_name,
+        trader_products,
         market,
         shop_doc_photo,
         service_category,
+        service_details,
         price_from,
         work_photos,
         state,
@@ -205,6 +208,7 @@ async function startServer() {
         res.status(400).json({ error: 'You must tick "I agree to Policies" before signing up.' });
         return;
       }
+      const isBuyerSignup = account_type === 'buyer' || (role === 'buyer' && account_type !== 'student' && account_type !== 'trader' && account_type !== 'service_provider');
       const badgeType: AccountBadge =
         account_type === 'trader' || account_type === 'service_provider' ? account_type : 'student';
 
@@ -217,35 +221,19 @@ async function startServer() {
         res.status(403).json({ error: 'This reserved Owner name or phone number cannot be registered.' });
         return;
       }
-      if (badgeType === 'student' && (!institution || !campus)) {
-        res.status(400).json({ error: 'Students must choose their School Name and Campus / Hostel.' });
-        return;
-      }
-      if (badgeType === 'trader' && (!shop_name || !market)) {
-        res.status(400).json({ error: 'Traders must enter Shop Name and Market.' });
-        return;
-      }
-      if (badgeType === 'service_provider' && (!service_category || !campus)) {
-        res.status(400).json({ error: 'Service Providers must choose Service Category and Location.' });
-        return;
-      }
-      if (
-        (badgeType === 'trader' || badgeType === 'service_provider') &&
-        (!String(id_doc_number || '').trim() || !String(business_reg_number || '').trim())
-      ) {
-        res.status(400).json({
-          error:
-            'Please provide both your National ID Number and Business Registration Number for your selected country.',
-        });
-        return;
-      }
-      const isSellerAccount =
-        role === 'seller' || badgeType === 'trader' || badgeType === 'service_provider';
-      if (isSellerAccount && (!payout_bank_name || !payout_account_number)) {
-        res.status(400).json({
-          error: 'Enter your Bank Account for Paystack Payouts so you can receive your 93% split automatically.',
-        });
-        return;
+      if (!isBuyerSignup) {
+        if (badgeType === 'student' && (!institution || !(student_id || id_doc_number))) {
+          res.status(400).json({ error: 'Student sellers must enter their Student ID and School.' });
+          return;
+        }
+        if (badgeType === 'trader' && (!shop_name || !trader_products)) {
+          res.status(400).json({ error: 'Traders must enter Business Name and Products sold.' });
+          return;
+        }
+        if (badgeType === 'service_provider' && !service_category) {
+          res.status(400).json({ error: 'Service Providers must choose their Service Type.' });
+          return;
+        }
       }
 
       if (normPhone.length < 7 || normPhone.length > 15) {
@@ -265,23 +253,23 @@ async function startServer() {
         language: language ? String(language) : undefined,
         password,
         account_type: badgeType,
-        role: role === 'seller' ? 'seller' : 'buyer',
-        institution: institution || market || campus || 'Campus Area',
+        role: isBuyerSignup ? 'buyer' : 'seller',
+        institution: isBuyerSignup ? '' : institution || market || campus || 'Campus Area',
         level,
         school_id_photo,
-        id_doc_type: id_doc_type ? String(id_doc_type) : undefined,
-        id_doc_number: id_doc_number ? String(id_doc_number).trim() : undefined,
+        id_doc_type: id_doc_type ? String(id_doc_type) : 'Student ID',
+        id_doc_number: (student_id || id_doc_number) ? String(student_id || id_doc_number).trim() : undefined,
         business_reg_type: business_reg_type ? String(business_reg_type) : undefined,
         business_reg_number: business_reg_number ? String(business_reg_number).trim() : undefined,
         secondary_reg_number: secondary_reg_number ? String(secondary_reg_number).trim() : undefined,
         shop_name,
-        market,
+        market: market || campus,
         shop_doc_photo,
         service_category,
         price_from: price_from ? Number(price_from) : undefined,
         work_photos: Array.isArray(work_photos) ? work_photos : [],
         state: state || 'Abuja FCT',
-        campus: campus || market || institution || 'Main Campus',
+        campus: campus || market || institution || 'Main Area',
         profile_pic,
         payout_bank_name: payout_bank_name ? String(payout_bank_name) : undefined,
         payout_account_number: payout_account_number ? String(payout_account_number) : undefined,
@@ -289,7 +277,16 @@ async function startServer() {
       });
 
       const token = signSessionToken(user.phone_number);
-      res.json({ token, user: toPublicUser(user, true) });
+      const publicUser = toPublicUser(user, true);
+      if (isBuyerSignup) {
+        publicUser.user_type = 'Buyer';
+        publicUser.badges = [];
+      } else {
+        if (student_id) publicUser.student_id = String(student_id);
+        if (trader_products) publicUser.trader_products = String(trader_products);
+        if (service_details) publicUser.service_details = String(service_details);
+      }
+      res.json({ token, user: publicUser });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : 'Signup failed.' });
     }
@@ -1066,83 +1063,306 @@ async function startServer() {
     }
   });
 
-  // === MART AI (SERVER-SIDE GEMINI API) ===
+  // === AFRI ASSISTANT (ULTRA-FAST SERVER-SIDE GEMINI API + STREAMING) ===
+  let cachedAiClient: { apiKey: string; client: GoogleGenAI } | null = null;
+  let cachedServerItems: { at: number; items: Awaited<ReturnType<typeof listActiveItems>> } = {
+    at: 0,
+    items: [],
+  };
+
+  function getFastAiClient(apiKey: string): GoogleGenAI {
+    if (!cachedAiClient || cachedAiClient.apiKey !== apiKey) {
+      cachedAiClient = {
+        apiKey,
+        client: new GoogleGenAI({
+          apiKey,
+          httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+        }),
+      };
+    }
+    return cachedAiClient.client;
+  }
+
+  async function getCachedServerItemsFast() {
+    const now = Date.now();
+    if (now - cachedServerItems.at < 60_000) {
+      return cachedServerItems.items;
+    }
+    try {
+      const fresh = await Promise.race([
+        listActiveItems({ lite: true }),
+        new Promise<Awaited<ReturnType<typeof listActiveItems>>>((resolve) =>
+          setTimeout(() => resolve(cachedServerItems.items), 700)
+        ),
+      ]);
+      if (fresh.length > 0) {
+        cachedServerItems = { at: now, items: fresh };
+      }
+    } catch {
+      // Keep stale cache
+    }
+    return cachedServerItems.items;
+  }
+
   app.post('/api/mart-ai', async (req: Request, res: Response) => {
     try {
-      const { message, institution, history } = req.body as {
-        message?: string;
-        institution?: string;
-        history?: Array<{ role: 'user' | 'assistant'; text: string }>;
-      };
+      const { message, institution, country, language, products, history, stream, userContext } =
+        req.body as {
+          message?: string;
+          institution?: string;
+          country?: string;
+          language?: string;
+          stream?: boolean;
+          userContext?: {
+            name?: string;
+            user_type?: 'Buyer' | 'Student' | 'Trader' | 'Service Provider';
+            role?: string;
+            school?: string;
+            student_id?: string;
+            business_name?: string;
+            products?: string;
+            service_type?: string;
+            service_details?: string;
+            area?: string;
+          };
+          products?: Array<{
+            id?: string;
+            name?: string;
+            title?: string;
+            price?: number;
+            formatted_price?: string;
+            available?: boolean;
+            category?: string;
+            condition?: string;
+            location?: string;
+            description?: string;
+          }>;
+          history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+        };
       const userMessage = (message || '').trim();
       if (!userMessage) {
-        res.status(400).json({ error: 'Please type a question for Mart AI.' });
+        res.status(400).json({ error: 'Please type a question for Afri Assistant.' });
         return;
       }
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        res.status(503).json({ error: 'Mart AI is not configured yet (missing GEMINI_API_KEY).' });
+        res.status(503).json({
+          error: 'Afri Assistant Gemini API is not configured yet (missing GEMINI_API_KEY).',
+        });
         return;
       }
 
-      // Include live marketplace inventory so Mart AI can find real items in their school
-      const activeItems = await listActiveItems();
-      const sameSchool = institution
-        ? activeItems.filter((i) => i.institution.toLowerCase() === institution.toLowerCase())
-        : [];
-      const sampleInventory = [...sameSchool, ...activeItems.filter((i) => i.institution !== institution)]
-        .slice(0, 18)
-        .map(
-          (i) =>
-            `- "${i.title}" | ₦${i.price.toLocaleString('en-NG')} | ${i.condition} | ${i.category} | ${i.institution} (${i.location})`
-        )
+      // Skip DB blocking if client sent live Supabase catalog; otherwise use fast 60s cached items
+      const clientList = Array.isArray(products) ? products : [];
+      const mergedServer =
+        clientList.length > 0 ? cachedServerItems.items : await getCachedServerItemsFast();
+
+      // Prioritize items relevant to the user's message so prompt stays tiny & fast
+      const queryWords = userMessage
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 2);
+
+      const scoreRelevance = (text: string) => {
+        if (queryWords.length === 0) return 0;
+        const lower = text.toLowerCase();
+        return queryWords.reduce((acc, w) => (lower.includes(w) ? acc + 1 : acc), 0);
+      };
+
+      type CompactProd = { line: string; score: number; titleKey: string };
+      const candidates: CompactProd[] = [];
+      const seenTitles = new Set<string>();
+
+      for (const p of clientList) {
+        const name = String(p.name || p.title || '').trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (seenTitles.has(key)) continue;
+        seenTitles.add(key);
+        const status = p.available === false ? 'Out of stock' : 'In stock';
+        const priceLabel =
+          p.formatted_price || (typeof p.price === 'number' ? `₦${p.price.toLocaleString('en-NG')}` : 'See listing');
+        const line = `- ${name} | ${priceLabel} | ${status} | ${p.category || 'General'} | ${p.location || country || 'Nigeria'}`;
+        candidates.push({
+          line,
+          score: scoreRelevance(`${name} ${p.category || ''} ${p.description || ''}`),
+          titleKey: key,
+        });
+      }
+
+      for (const i of mergedServer) {
+        const name = i.title.trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (seenTitles.has(key)) continue;
+        seenTitles.add(key);
+        const sameSchBonus =
+          institution && i.institution.toLowerCase() === institution.toLowerCase() ? 1 : 0;
+        const line = `- ${name} | ₦${i.price.toLocaleString('en-NG')} | In stock (${i.condition}) | ${i.category} | ${i.institution}`;
+        candidates.push({
+          line,
+          score: scoreRelevance(`${name} ${i.category} ${i.location}`) + sameSchBonus,
+          titleKey: key,
+        });
+      }
+
+      candidates.sort((a, b) => b.score - a.score);
+      const sampleInventory = candidates
+        .slice(0, 15)
+        .map((c) => c.line)
         .join('\n');
 
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
-      });
+      const userLanguage = (language || 'English').trim();
+      const ai = getFastAiClient(apiKey);
 
-      const systemInstruction = `You are "Mart AI", the friendly, helpful Nigerian campus student shopping & selling assistant on "Afri Student Mart — Powered by JOKEY PERKY GROUP".
-Speak warmly, clearly, and simply like a smart, trustworthy Nigerian senior student helper (clear English with occasional light relatable campus warmth — never cringe or unprofessional).
-Current student school: ${institution || 'Not selected yet'}.
+      let userPersonaSection = 'User Status: Guest shopper browsing Afri Student Mart.';
+      if (userContext?.user_type) {
+        const uName = userContext.name || 'Friend';
+        if (userContext.user_type === 'Student') {
+          userPersonaSection = `Remember User Profile: ${uName} is a STUDENT SELLER (School: ${userContext.school || institution || 'Campus'}, Student ID: ${userContext.student_id || 'verified'}, Area: ${userContext.area || 'Campus'}). Speak to them naturally as a fellow campus Student Seller — reference their school, campus deals, hostel delivery, QR code sharing, and student-friendly selling tips.`;
+        } else if (userContext.user_type === 'Trader') {
+          userPersonaSection = `Remember User Profile: ${uName} is a TRADER / BUSINESS SELLER (Business Name: ${userContext.business_name || 'Trader Shop'}, Products sold: ${userContext.products || 'General goods'}, Area: ${userContext.area || 'Market'}). Speak to them as a fellow merchant/Trader — help with Shop setup, listing products, pricing, boosting visibility, bulk orders, and Paystack payouts.`;
+        } else if (userContext.user_type === 'Service Provider') {
+          userPersonaSection = `Remember User Profile: ${uName} is a SERVICE PROVIDER (Service Type: ${userContext.service_type || 'Campus Service'}, Service Notes: ${userContext.service_details || 'Not yet detailed'}, Area: ${userContext.area || 'Campus/City'}). ALWAYS talk to them as a Service Provider and keep the conversation focused on their exact Service Type ("${userContext.service_type || 'Service'}") — help them refine packages, pricing, service areas, portfolio photos, bookings, and getting customers.`;
+        } else if (userContext.user_type === 'Buyer') {
+          userPersonaSection = `Remember User Profile: ${uName} is a BUYER (Area: ${userContext.area || 'Local Area'}). Speak to them warmly as a shopper — help them find products/services near their area, check prices, compare deals, and order safely via Escrow.`;
+        }
+      }
 
-Your 4 main duties:
-1. FIND ITEMS IN THEIR SCHOOL: Check the live listings below first and recommend exact matching items in their school (and mention if there are options from other schools).
-2. SUGGEST FAIR NAIRA PRICES (₦): Give realistic Nigerian campus student price ranges in Naira (₦) based on condition (New, Neatly Used, Fairly Used, Old but Working). Never quote outside Naira.
-3. HELP WRITE ITEM DESCRIPTIONS: Write clean, honest, catchy descriptions that state condition and campus meeting point — NEVER include phone numbers or WhatsApp links in descriptions (rule: chat stays inside the app).
-4. CAMPUS SAFETY ADVICE: Remind students to always meet in open campus spots during the day (Faculty, SUB, Main Gate, Library), inspect/test items thoroughly before paying, and pay only via Paystack Escrow on Afri Student Mart. If scammed, report in-app or email afristudentmartsupportjpg@gmail.com.
+      const systemInstruction = `You are "Afri Assistant" — friendly AI helper for Afri Student Mart (by Jokey Perky Group), like Meta AI.
+Personality: warm, smart, funny, natural Nigerian business friend. Never sound robotic. Never say "As an AI language model".
+Language setting: ${userLanguage}. Reply in ${userLanguage} (Pidgin=Nigerian Pidgin, Hausa, Yoruba, Igbo, French, or English). Switch immediately if user switches language in chat.
+${userPersonaSection}
+Facts: Head office Abuja, FCT Nigeria. Sells foodstuffs, groceries, clothes, shoes, bags, textbooks, phone accessories, beauty & student essentials + services. Delivers in Abuja & campuses (24-48h, fee varies by area). Payment: Paystack Escrow (transfer, card, mobile money, pay on delivery where supported). Support: afristudentmartsupportjpg@gmail.com. Country/School: ${country || 'Nigeria'} / ${institution || userContext?.school || 'General'}.
+Rules: Answer normal/general questions warmly like Meta AI. Address the user appropriately based on their saved user type above (Student, Trader, Service Provider, or Buyer). For product prices/stock, use ONLY the live list below (never invent prices/addresses). If missing, say you didn't find that exact item and offer alternatives or human support. Keep replies concise for mobile, use bullets for lists, and end business answers with a helpful next step.
 
-Live Marketplace Listings right now:
-${sampleInventory || 'No listings available yet.'}
-
-Keep answers concise, practical, and easy to read on a small Android phone screen.`;
+Live products:
+${sampleInventory || 'None loaded.'}`;
 
       const conversationText = Array.isArray(history)
         ? history
             .slice(-6)
-            .map((h) => `${h.role === 'user' ? 'Student' : 'Mart AI'}: ${h.text}`)
+            .map((h) => `${h.role === 'user' ? 'User' : 'Afri Assistant'}: ${h.text}`)
             .join('\n')
         : '';
 
-      const prompt = conversationText ? `${conversationText}\nStudent: ${userMessage}` : userMessage;
+      const prompt = conversationText ? `${conversationText}\nUser: ${userMessage}` : userMessage;
+
+      if (stream) {
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders?.();
+
+        const streamResp = await ai.models.generateContentStream({
+          model: 'gemini-3.1-flash-lite',
+          contents: prompt,
+          config: {
+            systemInstruction,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+          },
+        });
+
+        let sentAny = false;
+        for await (const chunk of streamResp) {
+          const textChunk = (chunk as GenerateContentResponse).text;
+          if (textChunk) {
+            sentAny = true;
+            res.write(`data: ${JSON.stringify({ text: textChunk })}\n\n`);
+          }
+        }
+        if (!sentAny) {
+          res.write(
+            `data: ${JSON.stringify({
+              text: 'I could not generate a response right now. Please try again!',
+            })}\n\n`
+          );
+        }
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
 
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'gemini-3.1-flash-lite',
         contents: prompt,
         config: {
           systemInstruction,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
         },
       });
 
-      res.json({ reply: response.text || 'I could not generate a response right now. Please try again!' });
+      res.json({
+        reply: response.text || 'I could not generate a response right now. Please try again!',
+      });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Mart AI encountered an error.';
+      const msg = err instanceof Error ? err.message : 'Afri Assistant encountered an error.';
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: msg })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      } else {
+        res.status(500).json({ error: msg });
+      }
+    }
+  });
+
+  app.post('/api/mart-ai/transcribe', async (req: Request, res: Response) => {
+    try {
+      const { audioBase64, mimeType, language } = req.body as {
+        audioBase64?: string;
+        mimeType?: string;
+        language?: string;
+      };
+      const cleanData = String(audioBase64 || '')
+        .replace(/^data:[^;]+;base64,/, '')
+        .trim();
+      if (!cleanData) {
+        res.status(400).json({ error: 'No voice audio received. Please try recording again.' });
+        return;
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        res.status(503).json({
+          error: 'Voice transcription is not configured yet (missing GEMINI_API_KEY).',
+        });
+        return;
+      }
+
+      const cleanMime = String(mimeType || 'audio/webm').split(';')[0].trim() || 'audio/webm';
+      const langHint = String(language || 'English').trim();
+      const ai = getFastAiClient(apiKey);
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-transcribe',
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: cleanMime,
+                data: cleanData,
+              },
+            },
+            {
+              text: `Transcribe this voice message cleanly in its spoken language (likely ${langHint}, English, Nigerian Pidgin, Hausa, Yoruba, Igbo, or French). Return ONLY the exact transcribed words, with no quotes or extra commentary. If no speech is audible, return an empty string.`,
+            },
+          ],
+        },
+      });
+
+      const transcript = (response.text || '').trim();
+      if (!transcript) {
+        res.status(400).json({
+          error: 'Could not hear clear speech in that recording. Please speak closer to your mic and try again.',
+        });
+        return;
+      }
+
+      res.json({ transcript });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Voice transcription failed.';
       res.status(500).json({ error: msg });
     }
   });

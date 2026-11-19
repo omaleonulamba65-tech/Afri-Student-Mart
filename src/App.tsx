@@ -52,7 +52,13 @@ import {
   setStoredToken,
 } from './lib/api';
 import { useI18n } from './lib/i18nContext';
-import { applyPageSeo, getSeoForView, resolveInitialRouteState, tabToPath } from './lib/seo';
+import {
+  applyPageSeo,
+  getSeoForView,
+  resolveInitialProductId,
+  resolveInitialRouteState,
+  tabToPath,
+} from './lib/seo';
 import { supabase } from './lib/supabaseClient';
 import {
   AdSettings,
@@ -99,6 +105,9 @@ const PolicyModal = lazy(() =>
 );
 const ProfileView = lazy(() =>
   import('./components/ProfileView').then((m) => ({ default: m.ProfileView }))
+);
+const ProductQrModal = lazy(() =>
+  import('./components/ProductQrModal').then((m) => ({ default: m.ProductQrModal }))
 );
 const SellItemView = lazy(() =>
   import('./components/SellItemView').then((m) => ({ default: m.SellItemView }))
@@ -222,6 +231,13 @@ export default function App() {
       const p = window.location.pathname;
       setRoutePath(p);
       if (p.replace(/\/+$/, '') !== '/owner-dashboard') {
+        const deepProductId = resolveInitialProductId();
+        if (deepProductId) {
+          setPendingDeepLinkProductId(deepProductId);
+        } else {
+          setPendingDeepLinkProductId(null);
+          setDetailItem(null);
+        }
         const resolved = resolveInitialRouteState();
         setActiveTab(resolved.tab);
         if (resolved.authModal) {
@@ -315,8 +331,12 @@ export default function App() {
   const [authModalOpen, setAuthModalOpen] = useState(Boolean(initialRoute.authModal));
   const [authMode, setAuthMode] = useState<'login' | 'signup'>(initialRoute.authModal || 'login');
   const [detailItem, setDetailItem] = useState<MarketplaceItem | null>(null);
+  const [qrItem, setQrItem] = useState<MarketplaceItem | null>(null);
+  const [pendingDeepLinkProductId, setPendingDeepLinkProductId] = useState<string | null>(() =>
+    resolveInitialProductId()
+  );
 
-  // Per-page SEO updates & clean URL synchronization across /, /market, /services, /live, /login, /signup
+  // Per-page SEO updates & clean URL synchronization across /, /market, /services, /live, /login, /signup, /product/:id
   useEffect(() => {
     const seo = getSeoForView({
       isOwnerRoute,
@@ -327,11 +347,13 @@ export default function App() {
     });
     applyPageSeo(seo);
 
-    if (!isOwnerRoute && typeof window !== 'undefined') {
+    if (!isOwnerRoute && !pendingDeepLinkProductId && typeof window !== 'undefined') {
       const targetPath = authModalOpen
         ? authMode === 'signup'
           ? '/signup'
           : '/login'
+        : detailItem
+        ? `/product/${encodeURIComponent(detailItem.id)}`
         : tabToPath(activeTab);
       const currentPath = window.location.pathname.replace(/\/+$/, '') || '/';
       if (currentPath !== targetPath && !(currentPath === '/' && targetPath === '/')) {
@@ -339,7 +361,7 @@ export default function App() {
         setRoutePath(targetPath);
       }
     }
-  }, [isOwnerRoute, activeTab, authModalOpen, authMode, detailItem]);
+  }, [isOwnerRoute, activeTab, authModalOpen, authMode, detailItem, pendingDeepLinkProductId]);
   const [checkoutItem, setCheckoutItem] = useState<MarketplaceItem | null>(null);
   const [activeServiceProfile, setActiveServiceProfile] = useState<ServiceProvider | null>(null);
   const [activePolicy, setActivePolicy] = useState<PolicyPageId | null>(null);
@@ -382,6 +404,27 @@ export default function App() {
     setToast(msg);
     setTimeout(() => setToast(''), 4000);
   }, []);
+
+  // Resolve scanned QR code / direct product deep links (/product/:id or ?product=:id)
+  useEffect(() => {
+    if (!pendingDeepLinkProductId || isOwnerRoute) return;
+    let cancelled = false;
+    api
+      .getItemDetail(pendingDeepLinkProductId)
+      .then((loaded) => {
+        if (cancelled) return;
+        setDetailItem(loaded);
+        setPendingDeepLinkProductId(null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPendingDeepLinkProductId(null);
+        showToast('Product link not found or listing was removed.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingDeepLinkProductId, isOwnerRoute, showToast]);
 
   const toggleLowData = () => {
     setLowDataMode((prev) => {
@@ -1065,6 +1108,7 @@ export default function App() {
           onAddToCart={handleAddToCart}
           onChat={(it) => handleOpenChat(it)}
           onReport={handleTriggerReport}
+          onShowQr={(it) => setQrItem(it)}
         />
       ))}
     </div>
@@ -2089,6 +2133,7 @@ export default function App() {
                   onAddToCart={handleAddToCart}
                   onChat={(it) => handleOpenChat(it)}
                   onReport={handleTriggerReport}
+                  onShowQr={(it) => setQrItem(it)}
                   onPostItem={() => setActiveTab('post')}
                   onOpenShops={() => setActiveTab('shop')}
                 />
@@ -2178,6 +2223,7 @@ export default function App() {
                     setAuthModalOpen(true);
                   }}
                   onViewItem={(it) => setDetailItem(it)}
+                  onShowQr={(it) => setQrItem(it)}
                   onContactShop={handleContactShop}
                   onUserUpdated={(u) => setUser(u)}
                   onNotice={(msg) => {
@@ -2213,6 +2259,7 @@ export default function App() {
                     setActiveTab(tab);
                   }}
                   onViewItem={(it) => setDetailItem(it)}
+                  onShowQr={(it) => setQrItem(it)}
                   onNotice={(msg) => {
                     showToast(msg);
                     fetchItemsPage(1, false);
@@ -2299,18 +2346,20 @@ export default function App() {
         }}
       />
 
-      {/* Floating Mart AI Assistant (lazy-loaded) */}
+      {/* Floating Afri Assistant (lazy-loaded) */}
       <Suspense fallback={null}>
         <MartAIWidget
           institution={
             user?.institution || (selectedInstitution !== 'All' ? selectedInstitution : undefined)
           }
+          items={items}
+          user={user}
         />
       </Suspense>
 
       {/* Step 1: Mandatory Language & Country -> State -> Area Picker BEFORE Signup / On First Visit */}
       <LanguagePickerModal
-        open={!hasChosenLanguage || langModalOpen}
+        open={(!hasChosenLanguage && !detailItem && !pendingDeepLinkProductId) || langModalOpen}
         canClose={hasChosenLanguage}
         user={user}
         initialState={selectedState}
@@ -2394,6 +2443,24 @@ export default function App() {
             onChat={handleOpenChat}
             onReportItem={handleTriggerReport}
             onBlockSeller={handleBlockSeller}
+            onShowQr={(it) => setQrItem(it)}
+          />
+        </Suspense>
+      )}
+
+      {qrItem && (
+        <Suspense fallback={null}>
+          <ProductQrModal
+            item={qrItem}
+            onClose={() => setQrItem(null)}
+            onViewProduct={
+              detailItem?.id === qrItem.id
+                ? undefined
+                : (it) => {
+                    setQrItem(null);
+                    setDetailItem(it);
+                  }
+            }
           />
         </Suspense>
       )}

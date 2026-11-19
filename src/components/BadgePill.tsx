@@ -42,10 +42,24 @@ export const VerifiedBadge: React.FC<BadgePillProps> = ({ badge, size = 'xs' }) 
   );
 };
 
-export const BadgeRow: React.FC<{ badges?: AccountBadge[]; size?: 'xs' | 'sm' }> = ({
-  badges,
-  size = 'xs',
-}) => {
+export const BadgeRow: React.FC<{
+  badges?: AccountBadge[];
+  size?: 'xs' | 'sm';
+  userType?: 'Buyer' | 'Student' | 'Trader' | 'Service Provider';
+}> = ({ badges, size = 'xs', userType }) => {
+  const textSize = size === 'sm' ? 'text-xs px-2.5 py-1' : 'text-[11px] px-2 py-0.5';
+  if (userType === 'Buyer' && (!badges || badges.length === 0)) {
+    return (
+      <div className="inline-flex flex-wrap items-center gap-1.5">
+        <span
+          className={`inline-flex items-center gap-1 rounded-md bg-emerald-700 text-white font-bold whitespace-nowrap shrink-0 ${textSize}`}
+        >
+          <BadgeCheck className="w-3.5 h-3.5 shrink-0" />
+          <span>Verified Buyer</span>
+        </span>
+      </div>
+    );
+  }
   const list = badges?.length ? badges.slice(0, 2) : (['student'] as AccountBadge[]);
   return (
     <div className="inline-flex flex-wrap items-center gap-1.5">

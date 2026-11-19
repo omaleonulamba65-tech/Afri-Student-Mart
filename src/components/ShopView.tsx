@@ -7,6 +7,7 @@ import {
   Globe,
   MessageCircle,
   Phone,
+  QrCode,
   Rocket,
   Sparkles,
   Star,
@@ -40,6 +41,7 @@ interface ShopViewProps {
   adSettings?: Partial<AdSettings> | null;
   onRequireAuth: () => void;
   onViewItem: (item: MarketplaceItem) => void;
+  onShowQr?: (item: MarketplaceItem) => void;
   onContactShop: (shop: TraderShop) => void;
   onUserUpdated: (user: PublicUser) => void;
   onNotice: (msg: string) => void;
@@ -50,6 +52,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   adSettings,
   onRequireAuth,
   onViewItem,
+  onShowQr,
   onContactShop,
   onUserUpdated,
   onNotice,
@@ -383,17 +386,32 @@ export const ShopView: React.FC<ShopViewProps> = ({
                       </div>
                     </div>
                   </button>
-                  {isOwnShop && !prod.is_boosted && (
-                    <div className="px-3 pb-3">
-                      <button
-                        type="button"
-                        onClick={() => handleBoostItem(prod)}
-                        disabled={boostingId === prod.id}
-                        className="w-full min-h-[36px] rounded-xl bg-orange-500 text-white text-xs font-extrabold inline-flex items-center justify-center gap-1"
-                      >
-                        <Rocket className="w-3.5 h-3.5" />
-                        <span>{boostingId === prod.id ? '...' : 'Boost ₦500'}</span>
-                      </button>
+                  {(onShowQr || (isOwnShop && !prod.is_boosted)) && (
+                    <div className="px-3 pb-3 flex items-center gap-1.5">
+                      {isOwnShop && !prod.is_boosted && (
+                        <button
+                          type="button"
+                          onClick={() => handleBoostItem(prod)}
+                          disabled={boostingId === prod.id}
+                          className="flex-1 min-h-[36px] rounded-xl bg-orange-500 text-white text-xs font-extrabold inline-flex items-center justify-center gap-1"
+                        >
+                          <Rocket className="w-3.5 h-3.5" />
+                          <span>{boostingId === prod.id ? '...' : 'Boost ₦500'}</span>
+                        </button>
+                      )}
+                      {onShowQr && (
+                        <button
+                          type="button"
+                          onClick={() => onShowQr(prod)}
+                          aria-label={`Show QR code for ${prod.title}`}
+                          className={`${
+                            isOwnShop && !prod.is_boosted ? 'px-2.5' : 'flex-1 px-3'
+                          } min-h-[36px] rounded-xl border border-slate-300 bg-slate-50 text-slate-800 text-xs font-extrabold inline-flex items-center justify-center gap-1 hover:bg-green-50 hover:border-green-700 hover:text-green-800`}
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>QR</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -659,6 +677,17 @@ export const ShopView: React.FC<ShopViewProps> = ({
                         {formatMoney(prod.price, prod.country)}
                       </div>
                     </button>
+                    {onShowQr && (
+                      <button
+                        type="button"
+                        onClick={() => onShowQr(prod)}
+                        aria-label={`Show QR code for ${prod.title}`}
+                        className="min-h-[38px] px-2.5 rounded-lg border border-slate-300 bg-white text-slate-800 text-xs font-extrabold inline-flex items-center gap-1 hover:bg-green-50 hover:border-green-700 hover:text-green-800 shrink-0"
+                      >
+                        <QrCode className="w-3.5 h-3.5" />
+                        <span>QR</span>
+                      </button>
+                    )}
                     {prod.is_boosted ? (
                       <span className="inline-flex items-center gap-1 rounded-lg bg-orange-100 px-2.5 py-1.5 text-[11px] font-extrabold text-orange-700 shrink-0">
                         <CheckCircle2 className="w-3.5 h-3.5" />

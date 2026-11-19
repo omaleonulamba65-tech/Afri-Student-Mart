@@ -1,7 +1,9 @@
 {
   "name": "Afri Student Mart",
   "description": "Buy and sell food, clothes, textbooks, services across West Africa. Created for students by JOKEY PERKY GROUP.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": [
+    "microphone"
+  ],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]

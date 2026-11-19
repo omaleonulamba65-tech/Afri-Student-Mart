@@ -3,40 +3,39 @@ import {
   ArrowLeft,
   Camera,
   Check,
+  ChevronRight,
   Eye,
   EyeOff,
-  FileCheck2,
   GraduationCap,
   Loader2,
+  MapPin,
+  MessageCircle,
+  Phone,
   Search,
   ShoppingBag,
+  Sparkles,
   Store,
   Trash2,
+  UserCheck,
   Wrench,
   X,
 } from 'lucide-react';
-import { Globe } from 'lucide-react';
 import { WEST_AND_SOUTH_AFRICA_COUNTRIES } from '../data/countries';
-import {
-  getCountryDocumentRequirement,
-  getStatesByCountry,
-} from '../data/countryDocuments';
+import { getStatesByCountry } from '../data/countryDocuments';
 import {
   NIGERIAN_INSTITUTIONS,
   getInstitutionsByCountry,
 } from '../data/institutions';
 import {
-  COUNTRY_LANGUAGE_CONFIGS,
   getCountryConfig,
   getCountryDisplayName,
 } from '../data/languages';
 import { ALL_MARKET_NAMES, getMarketsByCountry } from '../data/markets';
-import { EXACT_SAFETY_MESSAGES } from '../data/policies';
 import { api, compressImageFile } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
-import { AFRICAN_PAYOUT_BANKS } from '../lib/paystack';
 import {
   AccountBadge,
+  ITEM_CATEGORIES,
   PolicyPageId,
   PublicUser,
   SERVICE_CATEGORIES,
@@ -65,6 +64,94 @@ const LEVELS = [
   'Postgraduate',
 ];
 
+const QUICK_TRADER_PRODUCTS = [
+  'Foodstuffs & Groceries',
+  'Clothes & Fashion',
+  'Shoes & Sneakers',
+  'Bags & Backpacks',
+  'Phone Accessories',
+  'Textbooks & Stationery',
+  'Beauty & Skincare',
+  'Hostel Essentials',
+  'Electronics',
+];
+
+function getServiceConversationPrompt(serviceType: string): {
+  question: string;
+  placeholder: string;
+  helperTip: string;
+} {
+  const s = serviceType.toLowerCase();
+  if (s.includes('laundry')) {
+    return {
+      question: 'Tell us about your laundry setup: Which areas do you pick up/deliver from and how fast is your turnaround?',
+      placeholder: 'e.g. Same-day & 24hr wash/iron around Hostel A-D & Wuse, free pickup for 10+ clothes',
+      helperTip: 'Afri Assistant will use this to answer student laundry inquiries & suggest your service.',
+    };
+  }
+  if (s.includes('hair') || s.includes('makeup')) {
+    return {
+      question: 'What styles or looks do you specialize in, and do you offer hostel home-service or studio sessions?',
+      placeholder: 'e.g. Knotless braids, wig revamping, bridal & birthday glam — hostel home service available',
+      helperTip: 'Afri Assistant will remember your specialty and match you with customers looking for it.',
+    };
+  }
+  if (s.includes('phone') || s.includes('repair')) {
+    return {
+      question: 'Which phone brands & repairs do you handle (screens, batteries, charging ports) and how fast?',
+      placeholder: 'e.g. iPhone, Samsung, Tecno & Infinix screen/battery replacement in 1 hour with warranty',
+      helperTip: 'Afri Assistant will quote your specialty & turnaround when students ask for phone repairs.',
+    };
+  }
+  if (s.includes('tutor')) {
+    return {
+      question: 'Which courses, subjects, or exams do you tutor, and do you hold physical or online sessions?',
+      placeholder: 'e.g. MTH 101, CHM, GST & JAMB/WAEC prep — one-on-one at campus library or WhatsApp/Zoom',
+      helperTip: 'Afri Assistant will follow up with tutoring tips & direct students needing those courses to you.',
+    };
+  }
+  if (s.includes('delivery')) {
+    return {
+      question: 'Which campuses, hostels, or city zones do you deliver to, and do you use dispatch bike or foot?',
+      placeholder: 'e.g. Fast campus & city dispatch bike delivery across Abuja, Gwagwalada, Wuse & Lugbe',
+      helperTip: 'Afri Assistant will help route delivery leads in your covered zones to you.',
+    };
+  }
+  if (s.includes('photo')) {
+    return {
+      question: 'What shoots do you cover (portraits, graduations, events, product photos) & delivery time?',
+      placeholder: 'e.g. Matriculation, convocation, hostel portraits & product photography with edited copies in 24h',
+      helperTip: 'Afri Assistant will follow up with photoshoot package ideas for your bookings.',
+    };
+  }
+  if (s.includes('graphic')) {
+    return {
+      question: 'What designs do you create (flyers, logos, CVs, brand kits) & how fast do you deliver?',
+      placeholder: 'e.g. Business flyers, campus event posters, logos & CVs delivered within 12 hours',
+      helperTip: 'Afri Assistant will connect campus sellers & traders who need flyers/logos with you.',
+    };
+  }
+  if (s.includes('plumb')) {
+    return {
+      question: 'What plumbing jobs do you handle (leaks, sinks, pipes, pumps) & do you take emergency callouts?',
+      placeholder: 'e.g. Hostels & apartments — leaking taps, toilet/sink fixes, water tank & emergency repairs',
+      helperTip: 'Afri Assistant will highlight your rapid response areas to customers.',
+    };
+  }
+  if (s.includes('electr')) {
+    return {
+      question: 'What electrical work do you do (sockets, fans, lighting, inverters/solar) & response time?',
+      placeholder: 'e.g. Room wiring, ceiling fan installation, socket repairs & solar/inverter setup',
+      helperTip: 'Afri Assistant will remember your electrical specialty for nearby booking requests.',
+    };
+  }
+  return {
+    question: `Tell Afri Assistant about your "${serviceType || 'service'}" — what do you offer & what makes it stand out?`,
+    placeholder: 'e.g. Reliable service around campus, flexible hours, quick turnaround & student-friendly rates',
+    helperTip: 'Afri Assistant will remember your Service Type and continue the conversation with you.',
+  };
+}
+
 export const AuthModal: React.FC<AuthModalProps> = ({
   open,
   initialMode = 'login',
@@ -77,60 +164,58 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const initialCfg = getCountryConfig(initialCountry);
 
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
+  // Step 1: Phone + Country Code
+  // Step 2: Buyer or Seller?
+  // Step 3: If Buyer -> Easy Buyer Signup (Name, Phone, Area). If Seller -> Choose Student / Trader / Service Provider
+  // Step 4: (Seller only) Role-specific details (Student ID + School | Business Name + Products | Service Type + Follow-up)
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
-  // Step 1: Country & Language FIRST (before signup)
   const [signupCountry, setSignupCountry] = useState<string>(initialCfg.country);
   const [signupLanguage, setSignupLanguage] = useState<string>(language || 'English');
+  const [countryCode, setCountryCode] = useState(initialCfg.dialCode || '+234');
+  const [phone, setPhone] = useState('');
 
-  // Step 3: Account type picker (after Name, Phone, Password)
-  const [accountType, setAccountType] = useState<AccountBadge | ''>('');
+  const [role, setRole] = useState<'buyer' | 'seller' | ''>('');
+  const [sellerType, setSellerType] = useState<AccountBadge | ''>('');
 
-  // Shared / Login
+  // Login fields
   const [loginIdentifier, setLoginIdentifier] = useState('');
   const [loginName, setLoginName] = useState('');
   const [email, setEmail] = useState('');
-  const [countryCode, setCountryCode] = useState(initialCfg.dialCode || '+234');
-  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
 
-  // Common Signup
+  // Common user fields
   const [fullName, setFullName] = useState('');
-  const [role, setRole] = useState<'buyer' | 'seller'>('buyer');
-  const [stateName, setStateName] = useState(() => getStatesByCountry(initialCfg.country)[0] || initialCfg.country);
-  const [campus, setCampus] = useState('');
+  const [stateName, setStateName] = useState(
+    () => getStatesByCountry(initialCfg.country)[0] || initialCfg.country
+  );
+  const [area, setArea] = useState('');
   const [profilePic, setProfilePic] = useState('');
-  const [agreedPolicies, setAgreedPolicies] = useState(false);
+  const [agreedPolicies, setAgreedPolicies] = useState(true);
 
-  // Country-Based Verification Documents (dynamic per country)
-  const [idDocNumber, setIdDocNumber] = useState('');
-  const [businessRegNumber, setBusinessRegNumber] = useState('');
-  const [secondaryRegNumber, setSecondaryRegNumber] = useState('');
-
-  // Student-specific
+  // Student Seller fields (Student ID + School)
+  const [studentId, setStudentId] = useState('');
   const [instSearch, setInstSearch] = useState('');
   const [institution, setInstitution] = useState(() => {
     const list = getInstitutionsByCountry(initialCfg.country);
     return list[0]?.name || `${initialCfg.country} Campus`;
   });
+  const [customSchool, setCustomSchool] = useState('');
   const [level, setLevel] = useState('200 Level');
   const [schoolIdPhoto, setSchoolIdPhoto] = useState('');
 
-  // Trader-specific
+  // Trader Seller fields (Business Name + Products)
   const [shopName, setShopName] = useState('');
+  const [traderProducts, setTraderProducts] = useState('');
   const [market, setMarket] = useState('');
-  const [shopDocPhoto, setShopDocPhoto] = useState('');
 
-  // Service-provider-specific
+  // Service Provider Seller fields (Service Type + conversation follow-up)
   const [serviceCategory, setServiceCategory] = useState<string>(SERVICE_CATEGORIES[0]);
+  const [customServiceType, setCustomServiceType] = useState('');
+  const [serviceDetails, setServiceDetails] = useState('');
   const [priceFrom, setPriceFrom] = useState('2000');
   const [workPhotos, setWorkPhotos] = useState<string[]>([]);
-
-  // Seller Paystack Subaccount payout details
-  const [payoutBankName, setPayoutBankName] = useState<string>(AFRICAN_PAYOUT_BANKS[0]);
-  const [payoutAccountNumber, setPayoutAccountNumber] = useState('');
-  const [payoutAccountName, setPayoutAccountName] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [compressingImage, setCompressingImage] = useState(false);
@@ -140,6 +225,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   useEffect(() => {
     if (open) {
       setMode(initialMode);
+      setStep(1);
       setError('');
       setInfoMessage('');
       const targetCountry = country === 'All' ? 'Nigeria' : country;
@@ -154,21 +240,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const countryInsts = getInstitutionsByCountry(cfg.country);
       setInstitution(countryInsts[0]?.name || `${cfg.country} Main Campus`);
     }
-  }, [open, initialMode]);
+  }, [open, initialMode, country, language]);
 
   const activeSignupCountryCfg = getCountryConfig(signupCountry);
-  const docCfg = useMemo(() => getCountryDocumentRequirement(signupCountry), [signupCountry]);
   const availableStates = useMemo(() => getStatesByCountry(signupCountry), [signupCountry]);
   const countryMarkets = useMemo(() => {
     const groups = getMarketsByCountry(signupCountry);
     const list = groups.flatMap((g) => g.markets);
     return list.length > 0 ? list : ALL_MARKET_NAMES;
   }, [signupCountry]);
-
-  const isSellerSignup =
-    accountType === 'trader' ||
-    accountType === 'service_provider' ||
-    (accountType === 'student' && role === 'seller');
 
   const filteredInstitutions = useMemo(() => {
     const q = instSearch.trim().toLowerCase();
@@ -185,7 +265,45 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     );
   }, [instSearch, signupCountry]);
 
+  const resolvedServiceType =
+    serviceCategory === '__OTHER__'
+      ? customServiceType.trim() || 'Custom Service'
+      : serviceCategory;
+  const servicePrompt = useMemo(
+    () => getServiceConversationPrompt(resolvedServiceType),
+    [resolvedServiceType]
+  );
+
   if (!open) return null;
+
+  const handleSelectCountryByDialCode = (nextCode: string) => {
+    setCountryCode(nextCode);
+    const matched = WEST_AND_SOUTH_AFRICA_COUNTRIES.find((c) => c.code === nextCode);
+    if (!matched) return;
+    const cfg = getCountryConfig(matched.country);
+    setSignupCountry(cfg.country);
+    const defaultLang = cfg.languages.includes(signupLanguage)
+      ? signupLanguage
+      : cfg.languages[0] || 'English';
+    setSignupLanguage(defaultLang);
+    setCountryAndLanguage(cfg.country, defaultLang, true);
+    setMarket('');
+    setArea('');
+    const nextStates = getStatesByCountry(cfg.country);
+    const countryInsts = getInstitutionsByCountry(cfg.country);
+    if (countryInsts.length > 0) {
+      setInstitution(countryInsts[0].name);
+      const matchedState = nextStates.find(
+        (s) =>
+          s.toLowerCase().includes(countryInsts[0].state.toLowerCase()) ||
+          countryInsts[0].state.toLowerCase().includes(s.toLowerCase())
+      );
+      setStateName(matchedState || nextStates[0] || countryInsts[0].state);
+    } else {
+      setInstitution(`${cfg.country} Main Campus`);
+      setStateName(nextStates[0] || cfg.country);
+    }
+  };
 
   const handleSelectInstitution = (instName: string) => {
     setInstitution(instName);
@@ -237,37 +355,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     e.target.value = '';
   };
 
-  const handleSelectSignupCountry = (nextCountry: string) => {
-    const cfg = getCountryConfig(nextCountry);
-    setSignupCountry(cfg.country);
-    setCountryCode(cfg.dialCode);
-    const defaultLang = cfg.languages[0] || 'English';
-    setSignupLanguage(defaultLang);
-    setCountryAndLanguage(cfg.country, defaultLang, true);
-    // Reset country-specific documents and locations when switching country
-    setIdDocNumber('');
-    setBusinessRegNumber('');
-    setSecondaryRegNumber('');
-    setMarket('');
-    setCampus('');
-    const nextStates = getStatesByCountry(cfg.country);
-    const countryInsts = getInstitutionsByCountry(cfg.country);
-    if (countryInsts.length > 0) {
-      setInstitution(countryInsts[0].name);
-      const matchedState = nextStates.find((s) =>
-        s.toLowerCase().includes(countryInsts[0].state.toLowerCase()) ||
-        countryInsts[0].state.toLowerCase().includes(s.toLowerCase())
+  const toggleProductTag = (tag: string) => {
+    const current = traderProducts
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (current.some((c) => c.toLowerCase() === tag.toLowerCase())) {
+      setTraderProducts(
+        current.filter((c) => c.toLowerCase() !== tag.toLowerCase()).join(', ')
       );
-      setStateName(matchedState || nextStates[0] || countryInsts[0].state);
     } else {
-      setInstitution(`${cfg.country} Main Campus`);
-      setStateName(nextStates[0] || cfg.country);
+      setTraderProducts([...current, tag].join(', '));
     }
-  };
-
-  const handleSelectSignupLanguage = (nextLang: string) => {
-    setSignupLanguage(nextLang);
-    setCountryAndLanguage(signupCountry, nextLang, true);
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -295,91 +394,112 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleNextStep = () => {
+  const handleStep1Continue = () => {
     setError('');
-    setInfoMessage('');
-    if (step === 1) {
-      if (!signupCountry || !signupLanguage) {
-        setError('Please pick your Country and Language first.');
-        return;
-      }
-      setCountryAndLanguage(signupCountry, signupLanguage, true);
-      setStep(2);
-    } else if (step === 2) {
-      if (!fullName.trim() || !email.trim() || !email.includes('@') || !phone.trim() || password.length < 6) {
-        setError('Enter Full Name, valid Email Address, Phone Number, and Password (min 6 characters).');
-        return;
-      }
-      setStep(3);
-    } else if (step === 3) {
-      if (!accountType) {
-        setError('Please pick your account type: Student, Trader, or Service Provider.');
-        return;
-      }
-      if (accountType === 'student') {
-        if (!institution || !campus.trim()) {
-          setError('Please select your School Name and enter your Campus / Hostel Area.');
-          return;
-        }
-      } else if (accountType === 'trader') {
-        if (!shopName.trim() || !market.trim()) {
-          setError('Please enter your Shop Name and Market / Campus Location.');
-          return;
-        }
-        if (idDocNumber.trim().length < 5) {
-          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.idHint}`);
-          return;
-        }
-        if (businessRegNumber.trim().length < 4) {
-          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.businessHint}`);
-          return;
-        }
-        if (docCfg.secondaryBusinessLabel && secondaryRegNumber.trim().length < 5) {
-          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.secondaryBusinessHint}`);
-          return;
-        }
-      } else if (accountType === 'service_provider') {
-        if (!serviceCategory || !campus.trim() || !Number(priceFrom)) {
-          setError(
-            `Please select Service Category, enter Price From (${activeSignupCountryCfg.currencySymbol}), and your Location.`
-          );
-          return;
-        }
-        if (idDocNumber.trim().length < 5) {
-          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.idHint}`);
-          return;
-        }
-        if (businessRegNumber.trim().length < 4) {
-          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.businessHint}`);
-          return;
-        }
-        if (docCfg.secondaryBusinessLabel && secondaryRegNumber.trim().length < 5) {
-          setError(`Required for ${getCountryDisplayName(signupCountry)}: ${docCfg.secondaryBusinessHint}`);
-          return;
-        }
-      }
-      if (isSellerSignup && payoutAccountNumber.replace(/\D/g, '').length < 6) {
-        setError('Please enter your Bank Account Number for Paystack Payouts.');
-        return;
-      }
-      setStep(4);
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 7) {
+      setError('Enter a valid phone number (at least 7 digits).');
+      return;
     }
+    if (!countryCode) {
+      setError('Pick your country code.');
+      return;
+    }
+    setCountryAndLanguage(signupCountry, signupLanguage, true);
+    setStep(2);
+  };
+
+  const handleSelectBuyerOrSeller = (chosen: 'buyer' | 'seller') => {
+    setError('');
+    setRole(chosen);
+    if (chosen === 'buyer') {
+      setSellerType('');
+    }
+    setStep(3);
+  };
+
+  const handleSelectSellerType = (chosen: AccountBadge) => {
+    setError('');
+    setSellerType(chosen);
+    setStep(4);
   };
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setInfoMessage('');
-    if (!accountType) {
-      setError('Choose your account type.');
+
+    const phoneDigits = phone.replace(/\D/g, '');
+    if (phoneDigits.length < 7) {
+      setError('Enter a valid phone number.');
+      return;
+    }
+    if (!fullName.trim()) {
+      setError('Enter your Full Name.');
+      return;
+    }
+    if (!email.trim() || !email.includes('@')) {
+      setError('Enter a valid Email Address for sign in & order receipts.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Create a password with at least 6 characters.');
       return;
     }
     if (!agreedPolicies) {
-      setError('You must tick "I agree to Policies" before creating your account.');
+      setError('Please tick "I agree to Policies" to finish creating your account.');
       return;
     }
+
+    if (role === 'buyer') {
+      if (!area.trim()) {
+        setError('Enter your Area / Neighborhood (no Student ID or documents needed).');
+        return;
+      }
+    } else if (role === 'seller') {
+      if (!sellerType) {
+        setError('Choose your Seller option: Student, Trader, or Service Provider.');
+        return;
+      }
+      if (sellerType === 'student') {
+        const finalSchool =
+          institution === '__CUSTOM__' ? customSchool.trim() : institution.trim();
+        if (!studentId.trim()) {
+          setError('Enter your Student ID / Matric Number.');
+          return;
+        }
+        if (!finalSchool) {
+          setError('Select or enter your School name.');
+          return;
+        }
+      } else if (sellerType === 'trader') {
+        if (!shopName.trim()) {
+          setError('Enter your Business Name.');
+          return;
+        }
+        if (!traderProducts.trim()) {
+          setError('Enter the Products you sell.');
+          return;
+        }
+      } else if (sellerType === 'service_provider') {
+        if (!resolvedServiceType.trim()) {
+          setError('Choose or enter your Service Type.');
+          return;
+        }
+      }
+    } else {
+      setError('Choose whether to sign up as Buyer or Seller.');
+      return;
+    }
+
     setLoading(true);
     try {
+      const isBuyer = role === 'buyer';
+      const finalSchool =
+        institution === '__CUSTOM__' ? customSchool.trim() : institution.trim();
+      const finalArea =
+        area.trim() || market.trim() || stateName || availableStates[0] || signupCountry;
+
       const res = await api.signup({
         full_name: fullName.trim(),
         email: email.trim().toLowerCase(),
@@ -388,31 +508,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         country: signupCountry,
         language: signupLanguage,
         password,
-        account_type: accountType,
-        role: accountType === 'student' ? role : 'seller',
-        institution: accountType === 'student' ? institution : market || campus,
-        level: accountType === 'student' ? level : undefined,
-        school_id_photo: accountType === 'student' ? schoolIdPhoto : undefined,
-        shop_name: accountType === 'trader' ? shopName.trim() : undefined,
-        market: accountType === 'trader' ? market.trim() : undefined,
-        shop_doc_photo:
-          accountType === 'trader' || accountType === 'service_provider' ? shopDocPhoto : undefined,
-        service_category: accountType === 'service_provider' ? serviceCategory : undefined,
-        price_from: accountType === 'service_provider' ? Number(priceFrom) : undefined,
-        work_photos: accountType === 'service_provider' ? workPhotos : undefined,
+        account_type: isBuyer ? 'buyer' : (sellerType as AccountBadge),
+        role: isBuyer ? 'buyer' : 'seller',
+        institution:
+          !isBuyer && sellerType === 'student'
+            ? finalSchool
+            : isBuyer
+            ? ''
+            : market.trim() || finalArea,
+        student_id: !isBuyer && sellerType === 'student' ? studentId.trim() : undefined,
+        id_doc_number: !isBuyer && sellerType === 'student' ? studentId.trim() : undefined,
+        level: !isBuyer && sellerType === 'student' ? level : undefined,
+        school_id_photo: !isBuyer && sellerType === 'student' ? schoolIdPhoto : undefined,
+        shop_name: !isBuyer && sellerType === 'trader' ? shopName.trim() : undefined,
+        trader_products: !isBuyer && sellerType === 'trader' ? traderProducts.trim() : undefined,
+        market: !isBuyer && sellerType === 'trader' ? (market.trim() || finalArea) : undefined,
+        service_category:
+          !isBuyer && sellerType === 'service_provider' ? resolvedServiceType : undefined,
+        service_details:
+          !isBuyer && sellerType === 'service_provider' ? serviceDetails.trim() : undefined,
+        price_from:
+          !isBuyer && sellerType === 'service_provider'
+            ? Number(priceFrom || 2000)
+            : undefined,
+        work_photos:
+          !isBuyer && sellerType === 'service_provider' ? workPhotos : undefined,
         state: stateName || availableStates[0] || signupCountry,
-        campus: campus.trim() || market.trim() || 'Main Campus',
-        profile_pic: profilePic,
+        campus: finalArea,
+        profile_pic: profilePic || undefined,
         agreed_policies: agreedPolicies,
-        payout_bank_name: isSellerSignup ? payoutBankName : undefined,
-        payout_account_number: isSellerSignup ? payoutAccountNumber : undefined,
-        payout_account_name: isSellerSignup ? payoutAccountName || fullName.trim() : undefined,
-        id_doc_type: docCfg.idLabel,
-        id_doc_number: idDocNumber.trim() || undefined,
-        business_reg_type: docCfg.businessLabel,
-        business_reg_number: businessRegNumber.trim() || undefined,
-        secondary_reg_number: secondaryRegNumber.trim() || undefined,
       });
+
       setCountryAndLanguage(signupCountry, signupLanguage, true);
       if (res.needsEmailConfirmation || !res.token) {
         setLoginIdentifier(email.trim().toLowerCase());
@@ -429,6 +555,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setLoading(false);
     }
   };
+
+  const totalSteps = role === 'buyer' ? 3 : 4;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-white sm:bg-black/60 sm:items-center sm:justify-center sm:p-4">
@@ -501,13 +629,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div>
                 <h2 className="text-xl font-bold text-slate-900">{t('welcome_back')}</h2>
                 <p className="text-sm text-slate-600 mt-0.5">
-                  Sign in with your Supabase Email Address and Password.
+                  Sign in with your Email Address (or Phone Number) and Password.
                 </p>
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                  Email Address (or Phone Number)
+                  Email Address or Phone Number
                 </label>
                 <div className="flex gap-2">
                   {!loginIdentifier.includes('@') && (
@@ -529,7 +657,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     required
                     value={loginIdentifier}
                     onChange={(e) => setLoginIdentifier(e.target.value)}
-                    placeholder="you@example.com"
+                    placeholder="you@example.com or 08012345678"
                     className="flex-1 min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none focus:ring-2 focus:ring-green-700/20"
                   />
                 </div>
@@ -582,11 +710,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </form>
           ) : (
             <form onSubmit={handleSignup} className="space-y-4">
-              {/* 4-Step Indicator */}
+              {/* Step Indicator */}
               <div className="flex items-center justify-between text-xs font-semibold text-slate-600 pb-1">
-                <span>Step {step} of 4</span>
+                <span>
+                  Step {step} of {totalSteps}
+                </span>
                 <div className="flex items-center gap-1.5">
-                  {[1, 2, 3, 4].map((n) => (
+                  {Array.from({ length: totalSteps }, (_, idx) => idx + 1).map((n) => (
                     <span
                       key={n}
                       className={`h-2 rounded-full transition-all ${
@@ -597,60 +727,86 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-              {/* STEP 1: LANGUAGE & COUNTRY FIRST (BEFORE SIGN UP!) */}
+              {/* STEP 1: 1) ENTER PHONE NUMBER & 2) PICK COUNTRY CODE */}
               {step === 1 && (
                 <div className="space-y-4">
                   <div className="flex items-center gap-2.5">
                     <div className="w-10 h-10 rounded-xl bg-green-700 text-white flex items-center justify-center shrink-0">
-                      <Globe className="w-5 h-5" />
+                      <Phone className="w-5 h-5" />
                     </div>
                     <div>
                       <h2 className="text-lg font-extrabold text-slate-900">
-                        {t('step1_pick_lang')}
+                        Enter Phone Number &amp; Country Code
                       </h2>
-                      <p className="text-xs text-slate-600">{t('pick_lang_sub')}</p>
+                      <p className="text-xs text-slate-600">
+                        Fast signup — start with your phone number &amp; country dial code.
+                      </p>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-bold text-slate-900 mb-1.5">
-                      {t('country_label')} (West Africa + South Africa)
+                    <label
+                      htmlFor="signup-phone-input"
+                      className="block text-sm font-bold text-slate-900 mb-1.5"
+                    >
+                      1. {t('phone_number_label')} *
+                    </label>
+                    <input
+                      id="signup-phone-input"
+                      type="tel"
+                      required
+                      autoFocus
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="e.g. 08012345678"
+                      className="w-full min-h-[50px] rounded-xl border-2 border-slate-300 px-4 text-base font-semibold focus:border-green-700 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="signup-country-code"
+                      className="block text-sm font-bold text-slate-900 mb-1.5"
+                    >
+                      2. Pick Country Code *
                     </label>
                     <select
-                      value={signupCountry}
-                      onChange={(e) => handleSelectSignupCountry(e.target.value)}
+                      id="signup-country-code"
+                      value={countryCode}
+                      onChange={(e) => handleSelectCountryByDialCode(e.target.value)}
                       className="w-full min-h-[50px] rounded-xl border-2 border-green-700/40 bg-white px-3 text-base font-bold text-slate-900 focus:border-green-700 focus:outline-none"
                     >
-                      {COUNTRY_LANGUAGE_CONFIGS.map((cfg) => (
-                        <option key={cfg.country} value={cfg.country}>
-                          {cfg.flag} {getCountryDisplayName(cfg.country)} ({cfg.dialCode} · {cfg.currencySymbol.trim()})
+                      {WEST_AND_SOUTH_AFRICA_COUNTRIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.flag} {c.displayName} ({c.code}) · {c.currencySymbol.trim()}
                         </option>
                       ))}
                     </select>
                   </div>
 
+                  {/* Quick Language preference */}
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-sm font-bold text-slate-900">
-                        {t('language_label')} ({activeSignupCountryCfg.languages.length})
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold text-slate-700">
+                        Preferred Language ({getCountryDisplayName(signupCountry)})
                       </label>
-                      <span className="text-xs font-extrabold text-green-800">
-                        {signupLanguage}
-                      </span>
+                      <span className="text-xs font-extrabold text-green-800">{signupLanguage}</span>
                     </div>
-                    {/* ALL languages in the selected country shown visibly — none hidden */}
-                    <div className="flex flex-wrap gap-1.5 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                    <div className="flex flex-wrap gap-1.5">
                       {activeSignupCountryCfg.languages.map((lang) => {
                         const selected = signupLanguage === lang;
                         return (
                           <button
                             key={lang}
                             type="button"
-                            onClick={() => handleSelectSignupLanguage(lang)}
-                            className={`min-h-[36px] px-3 rounded-lg border text-xs font-bold transition-colors ${
+                            onClick={() => {
+                              setSignupLanguage(lang);
+                              setCountryAndLanguage(signupCountry, lang, true);
+                            }}
+                            className={`min-h-[34px] px-2.5 rounded-lg border text-xs font-bold transition-colors ${
                               selected
                                 ? 'bg-green-700 text-white border-green-700'
-                                : 'bg-white text-slate-800 border-slate-300 hover:border-green-700'
+                                : 'bg-white text-slate-700 border-slate-300 hover:border-green-700'
                             }`}
                           >
                             {lang}
@@ -662,7 +818,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                   <button
                     type="button"
-                    onClick={handleNextStep}
+                    onClick={handleStep1Continue}
                     className="w-full min-h-[52px] rounded-xl bg-green-700 text-white font-extrabold text-base hover:bg-green-800 transition-colors"
                   >
                     {t('continue_btn')} &rarr;
@@ -670,35 +826,404 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               )}
 
-              {/* STEP 2: NAME, PHONE (+ Country Code) & PASSWORD */}
+              {/* STEP 2: 3) ASK: SIGN UP AS BUYER OR SELLER? */}
               {step === 2 && (
                 <div className="space-y-4">
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setStep(1)}
+                      aria-label="Back to phone step"
                       className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-100 text-slate-700"
                     >
                       <ArrowLeft className="w-5 h-5" />
                     </button>
                     <div>
                       <h2 className="text-lg font-extrabold text-slate-900">
-                        {t('step2_details')}
+                        Sign up as Buyer or Seller?
                       </h2>
                       <p className="text-xs text-slate-600 inline-flex items-center gap-1.5">
-                        <span className="text-lg leading-none" aria-hidden="true">
-                          {activeSignupCountryCfg.flag}
-                        </span>
+                        <span>{activeSignupCountryCfg.flag}</span>
                         <span>
-                          {getCountryDisplayName(signupCountry)} · {signupLanguage}
+                          {countryCode} {phone}
                         </span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectBuyerOrSeller('buyer')}
+                      className={`rounded-2xl border-2 p-4 text-left transition-colors flex items-center gap-3.5 ${
+                        role === 'buyer'
+                          ? 'border-green-700 bg-green-50'
+                          : 'border-slate-200 bg-white hover:border-green-600 hover:bg-green-50/40'
+                      }`}
+                    >
+                      <div className="w-12 h-12 rounded-xl bg-green-700 text-white flex items-center justify-center shrink-0">
+                        <ShoppingBag className="w-6 h-6" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-base font-extrabold text-slate-900">Buyer</span>
+                          <span className="rounded-md bg-emerald-100 text-emerald-900 px-2 py-0.5 text-[11px] font-bold">
+                            Easy Signup
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-1">
+                          Name, Phone &amp; Area only — NO Student ID or documents required!
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-slate-400 shrink-0" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSelectBuyerOrSeller('seller')}
+                      className={`rounded-2xl border-2 p-4 text-left transition-colors flex items-center gap-3.5 ${
+                        role === 'seller'
+                          ? 'border-orange-500 bg-orange-50'
+                          : 'border-slate-200 bg-white hover:border-orange-400 hover:bg-orange-50/40'
+                      }`}
+                    >
+                      <div className="w-12 h-12 rounded-xl bg-orange-500 text-white flex items-center justify-center shrink-0">
+                        <Store className="w-6 h-6" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-base font-extrabold text-slate-900">Seller</span>
+                          <span className="rounded-md bg-orange-100 text-orange-900 px-2 py-0.5 text-[11px] font-bold">
+                            3 Options
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-1">
+                          Student, Trader, or Service Provider — sell items or get bookings.
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-slate-400 shrink-0" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 3A: IF BUYER -> EASY SIGNUP ONLY (Name, Phone, Area — NO Student ID or documents) */}
+              {step === 3 && role === 'buyer' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStep(2)}
+                      aria-label="Back to Buyer or Seller"
+                      className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-100 text-slate-700"
+                    >
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <div>
+                      <h2 className="text-lg font-extrabold text-slate-900">
+                        Easy Buyer Signup
+                      </h2>
+                      <p className="text-xs font-semibold text-green-800">
+                        Name, Phone &amp; Area only — no Student ID or documents needed
                       </p>
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                      {t('full_name_label')}
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="e.g. Amina Bello"
+                      className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-1.5">
+                      Phone Number *
+                    </label>
+                    <div className="flex gap-2">
+                      <span className="min-h-[48px] px-3 rounded-xl border border-slate-300 bg-slate-50 text-sm font-bold text-slate-800 inline-flex items-center gap-1.5 shrink-0">
+                        <span>{activeSignupCountryCfg.flag}</span>
+                        <span>{countryCode}</span>
+                      </span>
+                      <input
+                        type="tel"
+                        required
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="08012345678"
+                        className="flex-1 min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-800 mb-1.5">
+                        State / Region
+                      </label>
+                      <select
+                        value={availableStates.includes(stateName) ? stateName : availableStates[0]}
+                        onChange={(e) => setStateName(e.target.value)}
+                        className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-green-700 focus:outline-none"
+                      >
+                        {availableStates.map((st) => (
+                          <option key={st} value={st}>
+                            {st}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-800 mb-1.5">
+                        Your Area / Location *
+                      </label>
+                      <div className="relative">
+                        <MapPin className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          required
+                          list="afri-buyer-areas"
+                          value={area}
+                          onChange={(e) => setArea(e.target.value)}
+                          placeholder="e.g. Wuse II, Yaba, Legon"
+                          className="w-full min-h-[48px] rounded-xl border border-slate-300 pl-10 pr-3 text-sm sm:text-base focus:border-green-700 focus:outline-none"
+                        />
+                        <datalist id="afri-buyer-areas">
+                          {countryMarkets.map((m) => (
+                            <option key={m} value={m} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-3">
+                    <p className="text-xs font-bold text-slate-700">
+                      Login details (for order tracking &amp; chat sync)
+                    </p>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Email Address *
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3.5 text-sm focus:border-green-700 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Create Password *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showPass ? 'text' : 'password'}
+                          required
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="Min 6 characters"
+                          className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3.5 pr-11 text-sm focus:border-green-700 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPass(!showPass)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-500"
+                          aria-label={showPass ? 'Hide password' : 'Show password'}
+                        >
+                          {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Policy Agreement */}
+                  <div className="rounded-xl border border-slate-200 p-3 bg-white space-y-2">
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={agreedPolicies}
+                        onClick={() => setAgreedPolicies(!agreedPolicies)}
+                        className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${
+                          agreedPolicies
+                            ? 'bg-green-700 border-green-700 text-white'
+                            : 'bg-white border-slate-400'
+                        }`}
+                      >
+                        {agreedPolicies && <Check className="w-3.5 h-3.5" />}
+                      </button>
+                      <span className="text-xs text-slate-700 leading-snug">
+                        <strong>I agree to Policies</strong> (safe escrow payments &amp; community rules).
+                      </span>
+                    </label>
+                    <div className="flex flex-wrap gap-3 pl-7 text-[11px] font-semibold text-green-800">
+                      <button type="button" onClick={() => onOpenPolicy('terms')} className="underline">
+                        Terms
+                      </button>
+                      <button type="button" onClick={() => onOpenPolicy('privacy')} className="underline">
+                        Privacy
+                      </button>
+                      <button type="button" onClick={() => onOpenPolicy('safety')} className="underline">
+                        Safety
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full min-h-[52px] rounded-xl bg-green-700 text-white font-extrabold text-base hover:bg-green-800 disabled:opacity-60 transition-colors"
+                  >
+                    {loading ? 'Creating Buyer Account...' : 'Create Buyer Account'}
+                  </button>
+                </div>
+              )}
+
+              {/* STEP 3B: IF SELLER -> SHOW 3 OPTIONS: STUDENT, TRADER, SERVICE PROVIDER */}
+              {step === 3 && role === 'seller' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStep(2)}
+                      aria-label="Back to Buyer or Seller"
+                      className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-100 text-slate-700"
+                    >
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <div>
+                      <h2 className="text-lg font-extrabold text-slate-900">
+                        Choose Your Seller Type
+                      </h2>
+                      <p className="text-xs text-slate-600">
+                        Afri Assistant will remember your account type &amp; guide you accordingly.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSellerType('student')}
+                      className={`rounded-2xl border-2 p-4 flex items-center gap-3.5 text-left transition-colors ${
+                        sellerType === 'student'
+                          ? 'border-blue-600 bg-blue-50'
+                          : 'border-slate-200 bg-white hover:border-blue-400'
+                      }`}
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                        <GraduationCap className="w-6 h-6" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-extrabold text-slate-900">Student</span>
+                          <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            Student Seller
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          Ask Student ID + School. Sell textbooks, hostel items, gadgets &amp; food on campus.
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-slate-400 shrink-0" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSellerType('trader')}
+                      className={`rounded-2xl border-2 p-4 flex items-center gap-3.5 text-left transition-colors ${
+                        sellerType === 'trader'
+                          ? 'border-orange-500 bg-orange-50'
+                          : 'border-slate-200 bg-white hover:border-orange-400'
+                      }`}
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-orange-500 text-white flex items-center justify-center shrink-0">
+                        <Store className="w-6 h-6" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-extrabold text-slate-900">Trader</span>
+                          <span className="rounded-md bg-orange-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                            Business Shop
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          Ask Business Name + Products you sell. Reach students &amp; shoppers daily.
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-slate-400 shrink-0" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSellerType('service_provider')}
+                      className={`rounded-2xl border-2 p-4 flex items-center gap-3.5 text-left transition-colors ${
+                        sellerType === 'service_provider'
+                          ? 'border-green-700 bg-green-50'
+                          : 'border-slate-200 bg-white hover:border-green-500'
+                      }`}
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-green-700 text-white flex items-center justify-center shrink-0">
+                        <Wrench className="w-6 h-6" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-extrabold text-slate-900">
+                            Service Provider
+                          </span>
+                          <span className="rounded-md bg-green-700 px-2 py-0.5 text-[10px] font-bold text-white">
+                            Service Pro
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          Pick your Service Type &amp; continue a tailored setup conversation.
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-slate-400 shrink-0" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 4: SELLER ROLE-SPECIFIC FORM */}
+              {step === 4 && role === 'seller' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStep(3)}
+                      aria-label="Back to Seller Type"
+                      className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-100 text-slate-700"
+                    >
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <div>
+                      <h2 className="text-lg font-extrabold text-slate-900">
+                        {sellerType === 'student'
+                          ? 'Student Seller Setup'
+                          : sellerType === 'trader'
+                          ? 'Trader Business Setup'
+                          : 'Service Provider Setup'}
+                      </h2>
+                      <p className="text-xs text-slate-600">
+                        {activeSignupCountryCfg.flag} {countryCode} {phone}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-1.5">
+                      Full Name *
                     </label>
                     <input
                       type="text"
@@ -706,191 +1231,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="e.g. Adebayo Musa"
-                      className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none"
+                      className="w-full min-h-[46px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                      Email Address (Required for Supabase Auth Login)
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@example.com"
-                      className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                      {t('phone_number_label')} (West &amp; South Africa)
-                    </label>
-                    <div className="flex gap-2">
-                      <select
-                        value={countryCode}
-                        onChange={(e) => setCountryCode(e.target.value)}
-                        aria-label="Country code"
-                        className="w-44 sm:w-48 min-h-[48px] rounded-xl border border-slate-300 bg-white px-2 text-sm sm:text-base font-semibold text-slate-800 focus:border-green-700 focus:outline-none shrink-0"
-                      >
-                        {WEST_AND_SOUTH_AFRICA_COUNTRIES.map((c) => (
-                          <option key={c.code} value={c.code}>
-                            {c.flag} {c.displayName} ({c.code})
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="tel"
-                        required
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        placeholder="08012345678"
-                        className="flex-1 min-h-[48px] rounded-xl border border-slate-300 px-3 text-base focus:border-green-700 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                      {t('password_label')}
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showPass ? 'text' : 'password'}
-                        required
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Create password (min 6 chars)"
-                        className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 pr-12 text-base focus:border-green-700 focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPass(!showPass)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-500"
-                      >
-                        {showPass ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleNextStep}
-                    className="w-full min-h-[52px] rounded-xl bg-green-700 text-white font-bold text-base hover:bg-green-800 transition-colors"
-                  >
-                    Next: {t('step3_account_type')}
-                  </button>
-                </div>
-              )}
-
-              {/* STEP 3: ACCOUNT TYPE (AFTER Name, Phone, Password) + VERIFICATION DETAILS */}
-              {step === 3 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setStep(2)}
-                      className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-100 text-slate-700"
-                    >
-                      <ArrowLeft className="w-5 h-5" />
-                    </button>
-                    <div>
-                      <h2 className="text-lg font-extrabold text-slate-900">
-                        {t('step3_account_type')}
-                      </h2>
-                      <p className="text-xs text-slate-600">
-                        You can also add a 2nd badge later in Profile Settings.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Mandatory 3-Type Selector */}
-                  <div className="grid grid-cols-1 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => setAccountType('student')}
-                      className={`min-h-[60px] rounded-xl border-2 p-3 flex items-center gap-3 text-left transition-colors ${
-                        accountType === 'student'
-                          ? 'border-blue-600 bg-blue-50'
-                          : 'border-slate-200 bg-white hover:border-blue-300'
-                      }`}
-                    >
-                      <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
-                        <GraduationCap className="w-5 h-5" />
+                  {/* === STUDENT SELLER: STUDENT ID + SCHOOL === */}
+                  {sellerType === 'student' && (
+                    <div className="space-y-3.5 rounded-2xl border border-blue-200 bg-blue-50/50 p-4">
+                      <div className="flex items-center gap-2 text-xs font-extrabold text-blue-900">
+                        <GraduationCap className="w-4 h-4 text-blue-600" />
+                        <span>Student Seller Verification</span>
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-extrabold text-slate-900">Student</span>
-                          <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                            BLUE Verified Badge
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-600 mt-0.5">
-                          School Name, Level &amp; School ID photo
-                        </p>
-                      </div>
-                    </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setAccountType('trader')}
-                      className={`min-h-[60px] rounded-xl border-2 p-3 flex items-center gap-3 text-left transition-colors ${
-                        accountType === 'trader'
-                          ? 'border-orange-500 bg-orange-50'
-                          : 'border-slate-200 bg-white hover:border-orange-300'
-                      }`}
-                    >
-                      <div className="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center shrink-0">
-                        <Store className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-extrabold text-slate-900">Trader</span>
-                          <span className="rounded-md bg-orange-500 px-2 py-0.5 text-[10px] font-bold text-white">
-                            ORANGE Verified Badge
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-600 mt-0.5">
-                          Shop Name, Market &amp; {docCfg.idLabel.split('(')[0].trim()} / {docCfg.businessLabel.split('(')[0].trim()}
-                        </p>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setAccountType('service_provider')}
-                      className={`min-h-[60px] rounded-xl border-2 p-3 flex items-center gap-3 text-left transition-colors ${
-                        accountType === 'service_provider'
-                          ? 'border-green-700 bg-green-50'
-                          : 'border-slate-200 bg-white hover:border-green-400'
-                      }`}
-                    >
-                      <div className="w-10 h-10 rounded-xl bg-green-700 text-white flex items-center justify-center shrink-0">
-                        <Wrench className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-extrabold text-slate-900">
-                            Service Provider
-                          </span>
-                          <span className="rounded-md bg-green-700 px-2 py-0.5 text-[10px] font-bold text-white">
-                            GREEN Verified Badge
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-600 mt-0.5">
-                          Category, {docCfg.idLabel.split('(')[0].trim()}, Price From &amp; Location
-                        </p>
-                      </div>
-                    </button>
-                  </div>
-
-                  {accountType === 'student' && (
-                    <>
                       <div>
-                        <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Search School Name ({getCountryDisplayName(signupCountry)})
+                        <label className="block text-sm font-bold text-slate-900 mb-1">
+                          Student ID / Matric Number *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={studentId}
+                          onChange={(e) => setStudentId(e.target.value)}
+                          placeholder="e.g. 21/102938 or UNI/2024/0412"
+                          className="w-full min-h-[46px] rounded-xl border border-slate-300 bg-white px-4 text-base font-semibold focus:border-blue-600 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-bold text-slate-900 mb-1">
+                          School ({getCountryDisplayName(signupCountry)}) *
                         </label>
                         <div className="relative mb-2">
                           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -908,52 +1277,50 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                                     (i) =>
                                       i.name.toLowerCase().includes(q) ||
                                       i.shortName.toLowerCase().includes(q) ||
-                                      i.state.toLowerCase().includes(q) ||
-                                      (i.country || '').toLowerCase().includes(q) ||
-                                      i.type.toLowerCase().includes(q)
+                                      i.state.toLowerCase().includes(q)
                                   )
                                 : list;
                               if (matches.length > 0 && !matches.some((m) => m.name === institution)) {
                                 setInstitution(matches[0].name);
-                                const matchedState = availableStates.find((s) =>
-                                  s.toLowerCase().includes(matches[0].state.toLowerCase()) ||
-                                  matches[0].state.toLowerCase().includes(s.toLowerCase())
-                                );
-                                setStateName(matchedState || availableStates[0] || matches[0].state);
                               }
                             }}
-                            placeholder="Search university / college in your country..."
-                            className="w-full min-h-[44px] rounded-xl border border-slate-300 pl-10 pr-4 text-sm focus:border-blue-600 focus:outline-none"
+                            placeholder="Search university, polytechnic, or college..."
+                            className="w-full min-h-[42px] rounded-xl border border-slate-300 bg-white pl-10 pr-4 text-sm focus:border-blue-600 focus:outline-none"
                           />
                         </div>
                         <select
                           value={institution}
                           onChange={(e) => handleSelectInstitution(e.target.value)}
-                          className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-blue-600 focus:outline-none"
+                          className="w-full min-h-[46px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-blue-600 focus:outline-none"
                         >
-                          {filteredInstitutions.length === 0 ? (
-                            <option value={`${signupCountry} Campus`}>
-                              {signupCountry} Campus / School
+                          {filteredInstitutions.map((inst) => (
+                            <option key={inst.name} value={inst.name}>
+                              {inst.name}
                             </option>
-                          ) : (
-                            filteredInstitutions.map((inst) => (
-                              <option key={inst.name} value={inst.name}>
-                                {inst.name} — {inst.country ? inst.country : inst.type}
-                              </option>
-                            ))
-                          )}
+                          ))}
+                          <option value="__CUSTOM__">Other school (type below)</option>
                         </select>
+                        {institution === '__CUSTOM__' && (
+                          <input
+                            type="text"
+                            required
+                            value={customSchool}
+                            onChange={(e) => setCustomSchool(e.target.value)}
+                            placeholder="Enter your school / campus name"
+                            className="mt-2 w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3.5 text-sm focus:border-blue-600 focus:outline-none"
+                          />
+                        )}
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-sm font-semibold text-slate-800 mb-1.5">
+                          <label className="block text-xs font-bold text-slate-800 mb-1">
                             Level
                           </label>
                           <select
                             value={level}
                             onChange={(e) => setLevel(e.target.value)}
-                            className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-blue-600 focus:outline-none"
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-blue-600 focus:outline-none"
                           >
                             {LEVELS.map((lv) => (
                               <option key={lv} value={lv}>
@@ -963,293 +1330,129 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           </select>
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                            State / Region
+                          <label className="block text-xs font-bold text-slate-800 mb-1">
+                            Hostel / Campus Area
                           </label>
-                          <select
-                            value={availableStates.includes(stateName) ? stateName : availableStates[0]}
-                            onChange={(e) => setStateName(e.target.value)}
-                            className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-blue-600 focus:outline-none"
-                          >
-                            {availableStates.map((st) => (
-                              <option key={st} value={st}>
-                                {st}
-                              </option>
-                            ))}
-                          </select>
+                          <input
+                            type="text"
+                            value={area}
+                            onChange={(e) => setArea(e.target.value)}
+                            placeholder="e.g. Hostel Block B"
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm focus:border-blue-600 focus:outline-none"
+                          />
                         </div>
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Campus / Hostel Area *
+                      <div className="flex items-center justify-between gap-3 pt-1">
+                        <span className="text-xs font-semibold text-slate-700">
+                          School ID Photo (Optional)
+                        </span>
+                        <label className="inline-flex items-center gap-1.5 min-h-[36px] px-3 rounded-lg bg-blue-600 text-white text-xs font-bold cursor-pointer hover:bg-blue-700">
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>{schoolIdPhoto ? 'ID Photo Added ✓' : 'Upload ID Photo'}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleSingleImageUpload(e, setSchoolIdPhoto)}
+                            className="hidden"
+                          />
                         </label>
-                        <input
-                          type="text"
-                          required
-                          value={campus}
-                          onChange={(e) => setCampus(e.target.value)}
-                          placeholder="e.g. Main Campus / Hostel Block"
-                          className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-blue-600 focus:outline-none"
-                        />
                       </div>
-
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-800 mb-1">
-                          {docCfg.idLabel} (Optional for faster verification)
-                        </label>
-                        <input
-                          type="text"
-                          value={idDocNumber}
-                          onChange={(e) => setIdDocNumber(e.target.value)}
-                          placeholder={docCfg.idPlaceholder}
-                          className="w-full min-h-[46px] rounded-xl border border-slate-300 px-3.5 text-sm focus:border-blue-600 focus:outline-none"
-                        />
-                      </div>
-
-                      {/* School ID Photo */}
-                      <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3.5 flex items-center gap-3.5">
-                        <div className="w-16 h-16 rounded-xl bg-white border border-blue-200 overflow-hidden flex items-center justify-center shrink-0">
-                          {schoolIdPhoto ? (
-                            <img src={schoolIdPhoto} alt="School ID" className="w-full h-full object-cover" />
-                          ) : (
-                            <GraduationCap className="w-7 h-7 text-blue-600" />
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-slate-900">School ID Photo</p>
-                          <p className="text-xs text-slate-600">
-                            For your BLUE Verified Student badge (compressed &lt;200KB).
-                          </p>
-                          <label className="mt-2 inline-flex items-center gap-1.5 min-h-[38px] px-3 rounded-lg bg-blue-600 text-white text-xs font-bold cursor-pointer hover:bg-blue-700">
-                            <Camera className="w-4 h-4" />
-                            <span>{schoolIdPhoto ? 'Change School ID' : 'Upload School ID'}</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={(e) => handleSingleImageUpload(e, setSchoolIdPhoto)}
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          I want to start as:
-                        </label>
-                        <div className="grid grid-cols-2 gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setRole('buyer')}
-                            className={`min-h-[48px] rounded-xl border-2 px-3 flex items-center justify-center gap-2 font-bold text-sm ${
-                              role === 'buyer'
-                                ? 'border-blue-600 bg-blue-50 text-blue-900'
-                                : 'border-slate-200 text-slate-700'
-                            }`}
-                          >
-                            <ShoppingBag className="w-4 h-4" />
-                            <span>Buyer</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setRole('seller')}
-                            className={`min-h-[48px] rounded-xl border-2 px-3 flex items-center justify-center gap-2 font-bold text-sm ${
-                              role === 'seller'
-                                ? 'border-blue-600 bg-blue-50 text-blue-900'
-                                : 'border-slate-200 text-slate-700'
-                            }`}
-                          >
-                            <Store className="w-4 h-4" />
-                            <span>Seller</span>
-                          </button>
-                        </div>
-                      </div>
-                    </>
+                    </div>
                   )}
 
-                  {accountType === 'trader' && (
-                    <>
+                  {/* === TRADER: BUSINESS NAME + PRODUCTS === */}
+                  {sellerType === 'trader' && (
+                    <div className="space-y-3.5 rounded-2xl border border-orange-200 bg-orange-50/50 p-4">
+                      <div className="flex items-center gap-2 text-xs font-extrabold text-orange-950">
+                        <Store className="w-4 h-4 text-orange-600" />
+                        <span>Trader Business Details</span>
+                      </div>
+
                       <div>
-                        <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Shop Name *
+                        <label className="block text-sm font-bold text-slate-900 mb-1">
+                          Business Name *
                         </label>
                         <input
                           type="text"
                           required
                           value={shopName}
                           onChange={(e) => setShopName(e.target.value)}
-                          placeholder="e.g. Chinedu Gadgets & Phones"
-                          className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-orange-500 focus:outline-none"
+                          placeholder="e.g. Chinedu Gadgets & Provisions"
+                          className="w-full min-h-[46px] rounded-xl border border-slate-300 bg-white px-4 text-base font-semibold focus:border-orange-500 focus:outline-none"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Market / Plaza / Campus Gate ({getCountryDisplayName(signupCountry)}) *
+                        <label className="block text-sm font-bold text-slate-900 mb-1">
+                          Products You Sell *
                         </label>
                         <input
                           type="text"
                           required
-                          list="afri-markets-list-auth"
-                          value={market}
-                          onChange={(e) => {
-                            setMarket(e.target.value);
-                            setCampus(e.target.value);
-                          }}
-                          placeholder={`e.g. ${countryMarkets[0] || 'Central Market'}`}
-                          className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-orange-500 focus:outline-none"
+                          value={traderProducts}
+                          onChange={(e) => setTraderProducts(e.target.value)}
+                          placeholder="e.g. Sneakers, Rice & Beans, Phone Chargers"
+                          className="w-full min-h-[46px] rounded-xl border border-slate-300 bg-white px-4 text-sm focus:border-orange-500 focus:outline-none"
                         />
-                        <datalist id="afri-markets-list-auth">
-                          {countryMarkets.map((m) => (
-                            <option key={m} value={m} />
-                          ))}
-                        </datalist>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          State / Region
-                        </label>
-                        <select
-                          value={availableStates.includes(stateName) ? stateName : availableStates[0]}
-                          onChange={(e) => setStateName(e.target.value)}
-                          className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-orange-500 focus:outline-none"
-                        >
-                          {availableStates.map((st) => (
-                            <option key={st} value={st}>
-                              {st}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Dynamic Country-Based Verification Documents */}
-                      <div className="rounded-xl border-2 border-orange-300 bg-orange-50/70 p-3.5 space-y-3">
-                        <div className="flex items-center gap-2 text-xs font-extrabold text-orange-950">
-                          <FileCheck2 className="w-4 h-4 text-orange-600 shrink-0" />
-                          <span>
-                            {activeSignupCountryCfg.flag} {getCountryDisplayName(signupCountry)} Verification Documents (Required)
-                          </span>
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {QUICK_TRADER_PRODUCTS.map((tag) => {
+                            const active = traderProducts
+                              .toLowerCase()
+                              .includes(tag.toLowerCase());
+                            return (
+                              <button
+                                key={tag}
+                                type="button"
+                                onClick={() => toggleProductTag(tag)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
+                                  active
+                                    ? 'bg-orange-500 text-white border-orange-500'
+                                    : 'bg-white text-slate-700 border-slate-300 hover:border-orange-400'
+                                }`}
+                              >
+                                {active ? `✓ ${tag}` : `+ ${tag}`}
+                              </button>
+                            );
+                          })}
                         </div>
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          Categories supported: {ITEM_CATEGORIES.slice(0, 7).join(', ')}, etc.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs font-bold text-slate-900 mb-1">
-                            {docCfg.idLabel} *
+                          <label className="block text-xs font-bold text-slate-800 mb-1">
+                            Market / Shop Area
                           </label>
                           <input
                             type="text"
-                            required
-                            value={idDocNumber}
-                            onChange={(e) => setIdDocNumber(e.target.value)}
-                            placeholder={docCfg.idPlaceholder}
-                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-orange-500 focus:outline-none"
+                            list="afri-trader-markets"
+                            value={market}
+                            onChange={(e) => {
+                              setMarket(e.target.value);
+                              setArea(e.target.value);
+                            }}
+                            placeholder={`e.g. ${countryMarkets[0] || 'Central Market'}`}
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm focus:border-orange-500 focus:outline-none"
                           />
-                          <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.idHint}</p>
+                          <datalist id="afri-trader-markets">
+                            {countryMarkets.map((m) => (
+                              <option key={m} value={m} />
+                            ))}
+                          </datalist>
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-slate-900 mb-1">
-                            {docCfg.businessLabel} *
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={businessRegNumber}
-                            onChange={(e) => setBusinessRegNumber(e.target.value)}
-                            placeholder={docCfg.businessPlaceholder}
-                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-orange-500 focus:outline-none"
-                          />
-                          <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.businessHint}</p>
-                        </div>
-                        {docCfg.secondaryBusinessLabel && (
-                          <div>
-                            <label className="block text-xs font-bold text-slate-900 mb-1">
-                              {docCfg.secondaryBusinessLabel} *
-                            </label>
-                            <input
-                              type="text"
-                              required
-                              value={secondaryRegNumber}
-                              onChange={(e) => setSecondaryRegNumber(e.target.value)}
-                              placeholder={docCfg.secondaryBusinessPlaceholder}
-                              className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-orange-500 focus:outline-none"
-                            />
-                            <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.secondaryBusinessHint}</p>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="rounded-xl border border-orange-200 bg-orange-50/70 p-3.5 flex items-center gap-3.5">
-                        <div className="w-16 h-16 rounded-xl bg-white border border-orange-200 overflow-hidden flex items-center justify-center shrink-0">
-                          {shopDocPhoto ? (
-                            <img src={shopDocPhoto} alt="Shop or ID" className="w-full h-full object-cover" />
-                          ) : (
-                            <Store className="w-7 h-7 text-orange-500" />
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-slate-900">
-                            {docCfg.docPhotoLabel}
-                          </p>
-                          <p className="text-xs text-slate-600">
-                            For your ORANGE Verified Trader badge.
-                          </p>
-                          <label className="mt-2 inline-flex items-center gap-1.5 min-h-[38px] px-3 rounded-lg bg-orange-500 text-white text-xs font-bold cursor-pointer hover:bg-orange-600">
-                            <Camera className="w-4 h-4" />
-                            <span>{shopDocPhoto ? 'Change Photo' : 'Upload Doc / Shop Photo'}</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={(e) => handleSingleImageUpload(e, setShopDocPhoto)}
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {accountType === 'service_provider' && (
-                    <>
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Service Category
-                        </label>
-                        <select
-                          value={serviceCategory}
-                          onChange={(e) => setServiceCategory(e.target.value)}
-                          className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-base bg-white focus:border-green-700 focus:outline-none"
-                        >
-                          {SERVICE_CATEGORIES.map((cat) => (
-                            <option key={cat} value={cat}>
-                              {cat}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                            Price From ({activeSignupCountryCfg.currencySymbol.trim()})
-                          </label>
-                          <input
-                            type="number"
-                            min={10}
-                            required
-                            value={priceFrom}
-                            onChange={(e) => setPriceFrom(e.target.value)}
-                            placeholder="2000"
-                            className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base font-bold tabular-nums focus:border-green-700 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-800 mb-1.5">
+                          <label className="block text-xs font-bold text-slate-800 mb-1">
                             State / Region
                           </label>
                           <select
-                            value={availableStates.includes(stateName) ? stateName : availableStates[0]}
+                            value={
+                              availableStates.includes(stateName) ? stateName : availableStates[0]
+                            }
                             onChange={(e) => setStateName(e.target.value)}
-                            className="w-full min-h-[48px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-green-700 focus:outline-none"
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 px-3 text-sm bg-white focus:border-orange-500 focus:outline-none"
                           >
                             {availableStates.map((st) => (
                               <option key={st} value={st}>
@@ -1259,96 +1462,103 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           </select>
                         </div>
                       </div>
+                    </div>
+                  )}
+
+                  {/* === SERVICE PROVIDER: SERVICE TYPE + FOLLOW CONVERSATION BASED ON THAT SERVICE === */}
+                  {sellerType === 'service_provider' && (
+                    <div className="space-y-3.5 rounded-2xl border border-green-200 bg-green-50/50 p-4">
+                      <div className="flex items-center gap-2 text-xs font-extrabold text-green-950">
+                        <Wrench className="w-4 h-4 text-green-700" />
+                        <span>Service Provider Setup</span>
+                      </div>
 
                       <div>
-                        <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Service City / Market / Campus Area *
+                        <label className="block text-sm font-bold text-slate-900 mb-1">
+                          1. Choose Your Service Type *
                         </label>
-                        <input
-                          type="text"
-                          required
-                          list="afri-markets-list-auth"
-                          value={campus}
-                          onChange={(e) => setCampus(e.target.value)}
-                          placeholder={`e.g. ${countryMarkets[0] || 'City / Campus Area'}`}
-                          className="w-full min-h-[48px] rounded-xl border border-slate-300 px-4 text-base focus:border-green-700 focus:outline-none"
-                        />
-                        <datalist id="afri-markets-list-auth">
-                          {countryMarkets.map((m) => (
-                            <option key={m} value={m} />
+                        <select
+                          value={serviceCategory}
+                          onChange={(e) => setServiceCategory(e.target.value)}
+                          className="w-full min-h-[46px] rounded-xl border border-slate-300 px-3 text-base font-semibold bg-white focus:border-green-700 focus:outline-none"
+                        >
+                          {SERVICE_CATEGORIES.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
                           ))}
-                        </datalist>
+                          <option value="__OTHER__">Other Service (Type your own)</option>
+                        </select>
+                        {serviceCategory === '__OTHER__' && (
+                          <input
+                            type="text"
+                            required
+                            value={customServiceType}
+                            onChange={(e) => setCustomServiceType(e.target.value)}
+                            placeholder="e.g. Tailoring, Barbing, Laptop Repair, Catering"
+                            className="mt-2 w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3.5 text-sm focus:border-green-700 focus:outline-none"
+                          />
+                        )}
                       </div>
 
-                      {/* Dynamic Country-Based Verification Documents */}
-                      <div className="rounded-xl border-2 border-green-300 bg-green-50/70 p-3.5 space-y-3">
-                        <div className="flex items-center gap-2 text-xs font-extrabold text-green-950">
-                          <FileCheck2 className="w-4 h-4 text-green-700 shrink-0" />
-                          <span>
-                            {activeSignupCountryCfg.flag} {getCountryDisplayName(signupCountry)} Verification Documents (Required)
-                          </span>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-900 mb-1">
-                            {docCfg.idLabel} *
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={idDocNumber}
-                            onChange={(e) => setIdDocNumber(e.target.value)}
-                            placeholder={docCfg.idPlaceholder}
-                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-green-700 focus:outline-none"
-                          />
-                          <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.idHint}</p>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-900 mb-1">
-                            {docCfg.businessLabel} *
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={businessRegNumber}
-                            onChange={(e) => setBusinessRegNumber(e.target.value)}
-                            placeholder={docCfg.businessPlaceholder}
-                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-green-700 focus:outline-none"
-                          />
-                          <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.businessHint}</p>
-                        </div>
-                        {docCfg.secondaryBusinessLabel && (
-                          <div>
-                            <label className="block text-xs font-bold text-slate-900 mb-1">
-                              {docCfg.secondaryBusinessLabel} *
-                            </label>
-                            <input
-                              type="text"
-                              required
-                              value={secondaryRegNumber}
-                              onChange={(e) => setSecondaryRegNumber(e.target.value)}
-                              placeholder={docCfg.secondaryBusinessPlaceholder}
-                              className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-green-700 focus:outline-none"
-                            />
-                            <p className="text-[11px] text-slate-600 mt-0.5">{docCfg.secondaryBusinessHint}</p>
+                      {/* Dynamic Follow-up Conversation Box tailored to the selected Service Type */}
+                      <div className="rounded-xl border border-green-300 bg-white p-3.5 space-y-2.5 shadow-sm">
+                        <div className="flex items-start gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-[#0a7a42] text-white flex items-center justify-center shrink-0 mt-0.5">
+                            <MessageCircle className="w-4 h-4" />
                           </div>
-                        )}
-                        <label className="inline-flex items-center gap-1.5 min-h-[38px] px-3 rounded-lg bg-green-700 text-white text-xs font-bold cursor-pointer hover:bg-green-800">
-                          <Camera className="w-4 h-4" />
-                          <span>
-                            {shopDocPhoto ? 'ID / Reg Photo Uploaded ✓' : `Upload ${docCfg.idLabel.split('(')[0].trim()} Photo`}
-                          </span>
+                          <div>
+                            <p className="text-xs font-extrabold text-[#0a7a42] flex items-center gap-1">
+                              <span>Afri Assistant · {resolvedServiceType} Follow-up</span>
+                              <Sparkles className="w-3 h-3" />
+                            </p>
+                            <p className="text-xs font-semibold text-slate-800 mt-0.5 leading-snug">
+                              {servicePrompt.question}
+                            </p>
+                          </div>
+                        </div>
+
+                        <textarea
+                          rows={2}
+                          value={serviceDetails}
+                          onChange={(e) => setServiceDetails(e.target.value)}
+                          placeholder={servicePrompt.placeholder}
+                          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs sm:text-sm focus:border-green-700 focus:outline-none"
+                        />
+                        <p className="text-[11px] text-slate-500">{servicePrompt.helperTip}</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-800 mb-1">
+                            Starting Price ({activeSignupCountryCfg.currencySymbol.trim()})
+                          </label>
                           <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => handleSingleImageUpload(e, setShopDocPhoto)}
-                            className="hidden"
+                            type="number"
+                            min={10}
+                            value={priceFrom}
+                            onChange={(e) => setPriceFrom(e.target.value)}
+                            placeholder="2000"
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold tabular-nums focus:border-green-700 focus:outline-none"
                           />
-                        </label>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-800 mb-1">
+                            Service Area
+                          </label>
+                          <input
+                            type="text"
+                            value={area}
+                            onChange={(e) => setArea(e.target.value)}
+                            placeholder="e.g. Campus / Wuse II"
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm focus:border-green-700 focus:outline-none"
+                          />
+                        </div>
                       </div>
 
                       <div>
-                        <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                          Work Photos ({workPhotos.length}/4)
+                        <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                          Work Sample Photos (Optional, {workPhotos.length}/4)
                         </label>
                         <div className="grid grid-cols-4 gap-2">
                           {workPhotos.map((src, i) => (
@@ -1356,7 +1566,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                               key={i}
                               className="relative aspect-square rounded-xl overflow-hidden border border-slate-200"
                             >
-                              <img src={src} alt={`Work sample ${i + 1}`} className="w-full h-full object-cover" />
+                              <img
+                                src={src}
+                                alt={`Work sample ${i + 1}`}
+                                className="w-full h-full object-cover"
+                              />
                               <button
                                 type="button"
                                 onClick={() =>
@@ -1369,9 +1583,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             </div>
                           ))}
                           {workPhotos.length < 4 && (
-                            <label className="aspect-square rounded-xl border-2 border-dashed border-green-700/50 bg-green-50 flex flex-col items-center justify-center gap-1 cursor-pointer text-green-800">
-                              <Camera className="w-5 h-5" />
-                              <span className="text-[11px] font-bold">Work Pic</span>
+                            <label className="aspect-square rounded-xl border-2 border-dashed border-green-700/50 bg-white flex flex-col items-center justify-center gap-1 cursor-pointer text-green-800">
+                              <Camera className="w-4 h-4" />
+                              <span className="text-[10px] font-bold">Add Photo</span>
                               <input
                                 type="file"
                                 accept="image/*"
@@ -1383,166 +1597,88 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           )}
                         </div>
                       </div>
-                    </>
+                    </div>
                   )}
 
-                  {isSellerSignup && (
-                    <div className="rounded-xl border-2 border-green-700/30 bg-green-50/70 p-4 space-y-3">
+                  {/* Login Credentials & Policies */}
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-3">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                      <UserCheck className="w-4 h-4 text-green-700" />
+                      <span>Login details &amp; Payout readiness</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <h3 className="text-sm font-extrabold text-green-950">
-                          Enter your Bank Account for Paystack Payouts *
-                        </h3>
-                        <p className="text-xs font-semibold text-green-800 mt-0.5">
-                          {EXACT_SAFETY_MESSAGES.sellerFeeNote} Creates your Paystack Subaccount automatically.
-                        </p>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold text-slate-800 mb-1">
-                          Select Bank
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Email Address *
                         </label>
-                        <select
-                          value={payoutBankName}
-                          onChange={(e) => setPayoutBankName(e.target.value)}
-                          className="w-full min-h-[46px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold focus:border-green-700 focus:outline-none"
-                        >
-                          {AFRICAN_PAYOUT_BANKS.map((bank) => (
-                            <option key={bank} value={bank}>
-                              {bank}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-bold text-slate-800 mb-1">
-                            Account Number *
-                          </label>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            required={isSellerSignup}
-                            maxLength={12}
-                            value={payoutAccountNumber}
-                            onChange={(e) =>
-                              setPayoutAccountNumber(e.target.value.replace(/\D/g, ''))
-                            }
-                            placeholder="0123456789"
-                            className="w-full min-h-[46px] rounded-xl border border-slate-300 bg-white px-3.5 text-sm font-mono font-bold focus:border-green-700 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-800 mb-1">
-                            Account Name
-                          </label>
-                          <input
-                            type="text"
-                            value={payoutAccountName}
-                            onChange={(e) => setPayoutAccountName(e.target.value)}
-                            placeholder={fullName || 'Account holder name'}
-                            className="w-full min-h-[46px] rounded-xl border border-slate-300 bg-white px-3.5 text-sm focus:border-green-700 focus:outline-none"
-                          />
-                        </div>
-                      </div>
-
-                      <p className="text-[11px] text-slate-600">
-                        Your bank account is used ONLY to create your Paystack Subaccount for automatic 93% Split payouts and is NEVER displayed on Checkout.
-                      </p>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={handleNextStep}
-                    className="w-full min-h-[52px] rounded-xl bg-green-700 text-white font-bold text-base hover:bg-green-800 transition-colors"
-                  >
-                    Next: {t('step4_photo_policies')}
-                  </button>
-                </div>
-              )}
-
-              {/* STEP 4: PROFILE PHOTO & POLICIES */}
-              {step === 4 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setStep(3)}
-                      className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-100 text-slate-700"
-                    >
-                      <ArrowLeft className="w-5 h-5" />
-                    </button>
-                    <div>
-                      <h2 className="text-xl font-bold text-slate-900">
-                        {t('step4_photo_policies')}
-                      </h2>
-                      <p className="text-sm text-slate-600">
-                        Almost ready to buy, sell, or offer services.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4 rounded-xl border border-slate-200 p-4 bg-slate-50">
-                    <div className="w-16 h-16 rounded-full bg-green-100 border border-green-300 overflow-hidden flex items-center justify-center shrink-0">
-                      {profilePic ? (
-                        <img src={profilePic} alt="Preview" className="w-full h-full object-cover" />
-                      ) : (
-                        <Camera className="w-6 h-6 text-green-700" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-slate-900">Profile Picture (Optional)</p>
-                      <p className="text-xs text-slate-500">Compressed automatically to max 200KB.</p>
-                      <label className="mt-2 inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-lg bg-white border border-slate-300 text-xs font-bold text-slate-800 cursor-pointer hover:bg-slate-100">
-                        <Camera className="w-4 h-4" />
-                        <span>{profilePic ? 'Change Photo' : 'Upload Photo'}</span>
                         <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => handleSingleImageUpload(e, setProfilePic)}
-                          className="hidden"
+                          type="email"
+                          required
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="you@example.com"
+                          className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm focus:border-green-700 focus:outline-none"
                         />
-                      </label>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Create Password *
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showPass ? 'text' : 'password'}
+                            required
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Min 6 characters"
+                            className="w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 pr-10 text-sm focus:border-green-700 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPass(!showPass)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-500"
+                            aria-label={showPass ? 'Hide password' : 'Show password'}
+                          >
+                            {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Mandatory Policy Checkbox */}
-                  <div className="rounded-xl border border-slate-200 p-4 bg-white space-y-3">
-                    <label className="flex items-start gap-3 cursor-pointer">
+                  {/* Policy Agreement */}
+                  <div className="rounded-xl border border-slate-200 p-3 bg-white space-y-2">
+                    <label className="flex items-start gap-2.5 cursor-pointer">
                       <button
                         type="button"
                         role="checkbox"
                         aria-checked={agreedPolicies}
                         onClick={() => setAgreedPolicies(!agreedPolicies)}
-                        className={`mt-0.5 w-6 h-6 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
+                        className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${
                           agreedPolicies
                             ? 'bg-green-700 border-green-700 text-white'
                             : 'bg-white border-slate-400'
                         }`}
                       >
-                        {agreedPolicies && <Check className="w-4 h-4" />}
+                        {agreedPolicies && <Check className="w-3.5 h-3.5" />}
                       </button>
-                      <span className="text-sm text-slate-800 leading-snug">
-                        <strong>I agree to Policies</strong> — I will post real photos, quote honest prices in local currency ({activeSignupCountryCfg.currencySymbol}), chat inside the app, and follow all safety rules.
+                      <span className="text-xs text-slate-700 leading-snug">
+                        <strong>I agree to Policies</strong> — post real photos, honest prices in{' '}
+                        {activeSignupCountryCfg.currencySymbol.trim()}, and chat safely in-app.
                       </span>
                     </label>
-
-                    <div className="flex flex-wrap gap-x-3 gap-y-1.5 pl-9 text-xs font-semibold text-green-800">
+                    <div className="flex flex-wrap gap-3 pl-7 text-[11px] font-semibold text-green-800">
                       <button type="button" onClick={() => onOpenPolicy('terms')} className="underline">
-                        Terms of Service
+                        Terms
+                      </button>
+                      <button type="button" onClick={() => onOpenPolicy('seller_policy')} className="underline">
+                        Seller Policy
                       </button>
                       <button type="button" onClick={() => onOpenPolicy('privacy')} className="underline">
-                        Privacy Policy
-                      </button>
-                      <button type="button" onClick={() => onOpenPolicy('community')} className="underline">
-                        Community Rules
+                        Privacy
                       </button>
                       <button type="button" onClick={() => onOpenPolicy('safety')} className="underline">
-                        Safety Tips
-                      </button>
-                      <button type="button" onClick={() => onOpenPolicy('prohibited')} className="underline">
-                        Prohibited Items
+                        Safety
                       </button>
                     </div>
                   </div>
@@ -1552,7 +1688,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     disabled={loading}
                     className="w-full min-h-[52px] rounded-xl bg-green-700 text-white font-extrabold text-base hover:bg-green-800 disabled:opacity-60 transition-colors shadow-sm"
                   >
-                    {loading ? 'Creating Account...' : t('create_account')}
+                    {loading
+                      ? 'Creating Account...'
+                      : sellerType === 'student'
+                      ? 'Create Student Seller Account'
+                      : sellerType === 'trader'
+                      ? 'Create Trader Account'
+                      : 'Create Service Provider Account'}
                   </button>
                 </div>
               )}
