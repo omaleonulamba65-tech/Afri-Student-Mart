@@ -52,6 +52,7 @@ import {
   setStoredToken,
 } from './lib/api';
 import { useI18n } from './lib/i18nContext';
+import { applyPageSeo, getSeoForView, resolveInitialRouteState, tabToPath } from './lib/seo';
 import { supabase } from './lib/supabaseClient';
 import {
   AdSettings,
@@ -194,12 +195,13 @@ export default function App() {
     formatMoney,
   } = useI18n();
 
+  const [initialRoute] = useState(() => resolveInitialRouteState());
   const [user, setUser] = useState<PublicUser | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [routePath, setRoutePath] = useState<string>(() =>
     typeof window !== 'undefined' ? window.location.pathname : '/'
   );
-  const [activeTab, setActiveTab] = useState<NavTab>('home');
+  const [activeTab, setActiveTab] = useState<NavTab>(initialRoute.tab);
   const [langModalOpen, setLangModalOpen] = useState(false);
 
   const isOwnerRoute = routePath.replace(/\/+$/, '') === '/owner-dashboard';
@@ -217,7 +219,18 @@ export default function App() {
 
   useEffect(() => {
     const onPopState = () => {
-      setRoutePath(window.location.pathname);
+      const p = window.location.pathname;
+      setRoutePath(p);
+      if (p.replace(/\/+$/, '') !== '/owner-dashboard') {
+        const resolved = resolveInitialRouteState();
+        setActiveTab(resolved.tab);
+        if (resolved.authModal) {
+          setAuthMode(resolved.authModal);
+          setAuthModalOpen(true);
+        } else {
+          setAuthModalOpen(false);
+        }
+      }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -299,9 +312,34 @@ export default function App() {
   const [savingWantAlert, setSavingWantAlert] = useState(false);
 
   // Modals & notifications
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authModalOpen, setAuthModalOpen] = useState(Boolean(initialRoute.authModal));
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>(initialRoute.authModal || 'login');
   const [detailItem, setDetailItem] = useState<MarketplaceItem | null>(null);
+
+  // Per-page SEO updates & clean URL synchronization across /, /market, /services, /live, /login, /signup
+  useEffect(() => {
+    const seo = getSeoForView({
+      isOwnerRoute,
+      activeTab,
+      authModalOpen,
+      authMode,
+      detailItem,
+    });
+    applyPageSeo(seo);
+
+    if (!isOwnerRoute && typeof window !== 'undefined') {
+      const targetPath = authModalOpen
+        ? authMode === 'signup'
+          ? '/signup'
+          : '/login'
+        : tabToPath(activeTab);
+      const currentPath = window.location.pathname.replace(/\/+$/, '') || '/';
+      if (currentPath !== targetPath && !(currentPath === '/' && targetPath === '/')) {
+        window.history.replaceState({}, '', targetPath);
+        setRoutePath(targetPath);
+      }
+    }
+  }, [isOwnerRoute, activeTab, authModalOpen, authMode, detailItem]);
   const [checkoutItem, setCheckoutItem] = useState<MarketplaceItem | null>(null);
   const [activeServiceProfile, setActiveServiceProfile] = useState<ServiceProvider | null>(null);
   const [activePolicy, setActivePolicy] = useState<PolicyPageId | null>(null);

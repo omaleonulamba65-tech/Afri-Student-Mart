@@ -1,6 +1,6 @@
 {
   "name": "Afri Student Mart",
-  "description": "Nigeria's student campus marketplace powered by JOKEY PERKY GROUP. Buy, sell, and chat safely within your university, polytechnic, or college.",
+  "description": "Buy and sell food, clothes, textbooks, services across West Africa. Created for students by JOKEY PERKY GROUP.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
