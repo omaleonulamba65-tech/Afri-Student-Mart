@@ -1,13 +1,17 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Bell,
   BellRing,
   BookOpen,
+  Check,
   CheckCircle2,
   Cpu,
   FileText,
   Flame,
   Footprints,
+  Globe,
   Globe2,
+  PlayCircle,
   Search,
   ShieldCheck,
   Shirt,
@@ -17,6 +21,8 @@ import {
   Sparkles,
   Store,
   Timer,
+  TrendingUp,
+  UserPlus,
   Utensils,
   Wifi,
   WifiOff,
@@ -39,6 +45,7 @@ import {
 import { getMarketsByCountry } from './data/markets';
 import {
   api,
+  formatTimeAgo,
   getLowDataMode,
   isVerifiedOwnerUser,
   setLowDataMode as persistLowDataMode,
@@ -58,6 +65,7 @@ import {
   PublicUser,
   ServiceProvider,
   TraderShop,
+  UserNotification,
 } from './types';
 
 // Code-split secondary views & modals so Home loads in <2 seconds even on 3G Android phones
@@ -286,6 +294,13 @@ export default function App() {
   const [activePolicy, setActivePolicy] = useState<PolicyPageId | null>(null);
   const [activeChatTarget, setActiveChatTarget] = useState<{ itemId: string; partnerId?: string } | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [notifications, setNotifications] = useState<UserNotification[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [browserNotifPermission, setBrowserNotifPermission] = useState<string>(() =>
+    typeof window !== 'undefined' && 'Notification' in window ? window.Notification.permission : 'unsupported'
+  );
 
   const [adSettings, setAdSettings] = useState<AdSettings>({
     ads_enabled: false,
@@ -308,11 +323,14 @@ export default function App() {
   const [toast, setToast] = useState('');
 
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const notifPanelRef = useRef<HTMLDivElement>(null);
+  const homeFeedRef = useRef<HTMLDivElement>(null);
+  const homeSearchInputRef = useRef<HTMLInputElement>(null);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 4000);
-  };
+  }, []);
 
   const toggleLowData = () => {
     setLowDataMode((prev) => {
@@ -335,12 +353,13 @@ export default function App() {
 
   // Fetch paginated lite items from Supabase (10 products per page)
   const fetchItemsPage = useCallback(
-    async (targetPage: number, append: boolean) => {
+    async (targetPage: number, append: boolean, overrideSearch?: string) => {
       if (append) {
         setLoadingMore(true);
       } else {
         setLoadingItems(true);
       }
+      const activeSearch = overrideSearch !== undefined ? overrideSearch : debouncedSearch;
       try {
         const res = await api.getItems({
           page: targetPage,
@@ -348,7 +367,7 @@ export default function App() {
           lite: true,
           country: country === 'All' ? undefined : country,
           state: selectedState !== 'All' ? selectedState : undefined,
-          search: debouncedSearch || undefined,
+          search: activeSearch || undefined,
           category: selectedCategory,
           condition: selectedCondition,
           institution: selectedInstitution,
@@ -389,6 +408,21 @@ export default function App() {
     ]
   );
 
+  const handleHomeSearchSubmit = useCallback(
+    (e?: React.FormEvent) => {
+      e?.preventDefault();
+      const trimmed = search.trim();
+      setSearch(trimmed);
+      setDebouncedSearch(trimmed);
+      void fetchItemsPage(1, false, trimmed);
+      homeSearchInputRef.current?.blur();
+      if (homeFeedRef.current) {
+        homeFeedRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    },
+    [search, fetchItemsPage]
+  );
+
   const fetchHotDeals = useCallback(() => {
     api
       .getItems({
@@ -401,7 +435,7 @@ export default function App() {
       .catch(() => {});
   }, [country]);
 
-  const refreshUnread = async () => {
+  const refreshUnread = useCallback(async () => {
     try {
       const res = await api.getThreads();
       const threads = Array.isArray(res?.threads) ? res.threads : [];
@@ -410,16 +444,63 @@ export default function App() {
     } catch {
       // Ignore
     }
-  };
+  }, []);
 
-  const fetchWishlist = async () => {
+  const refreshNotifications = useCallback(async (showSpinner = false) => {
+    if (showSpinner) setNotificationsLoading(true);
+    try {
+      const res = await api.getNotifications();
+      setNotifications(res.notifications);
+      setUnreadNotificationsCount(res.unread_count);
+    } catch {
+      // Ignore
+    } finally {
+      if (showSpinner) setNotificationsLoading(false);
+    }
+  }, []);
+
+  const fetchWishlist = useCallback(async () => {
     try {
       const res = await api.getWishlist();
       setWishlistIds(Array.isArray(res?.item_ids) ? res.item_ids : []);
     } catch {
       // Ignore
     }
-  };
+  }, []);
+
+  const triggerBrowserNotification = useCallback((title: string, body: string) => {
+    if (
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      window.Notification.permission === 'granted' &&
+      document.hidden
+    ) {
+      try {
+        new window.Notification(title, { body });
+      } catch {
+        // Ignore on unsupported mobile browsers
+      }
+    }
+  }, []);
+
+  // Close notification drawer on outside click or Escape
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const onPointerDown = (ev: MouseEvent) => {
+      if (notifPanelRef.current && !notifPanelRef.current.contains(ev.target as Node)) {
+        setNotificationsOpen(false);
+      }
+    };
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setNotificationsOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [notificationsOpen]);
 
   // Boot: restore Supabase Auth session, fetch wishlist, load Top 10 Cheap Hot Deals & defer ad settings
   useEffect(() => {
@@ -430,6 +511,7 @@ export default function App() {
         if (res?.user) {
           setUser(res.user);
           refreshUnread();
+          refreshNotifications();
           fetchWishlist();
         } else {
           setStoredToken(null);
@@ -450,14 +532,16 @@ export default function App() {
         .catch(() => {});
     }, 300);
     return () => clearTimeout(adTimer);
-  }, [fetchHotDeals]);
+  }, [fetchHotDeals, refreshUnread, refreshNotifications, fetchWishlist]);
 
   // Sync browser document title with configured site name
   useEffect(() => {
     const cleanName = (adSettings.site_name || '').trim() || 'Afri Student Mart';
     document.title = isOwnerRoute
       ? `Owner Dashboard · ${cleanName}`
-      : `${cleanName} — West & South Africa Student Marketplace`;
+      : cleanName === 'Afri Student Mart'
+      ? 'Afri Student Mart - Your Market. Your Hustle. All In One Place.'
+      : `${cleanName} - Your Market. Your Hustle. All In One Place.`;
   }, [adSettings.site_name, isOwnerRoute]);
 
   // Re-fetch page 1 whenever filters/debounced search change
@@ -477,42 +561,91 @@ export default function App() {
     return () => clearInterval(timer);
   }, [fetchHotDeals]);
 
-  // Real-time Supabase Realtime subscription for logged-in user (messages + Price Drop Alerts)
+  // Real-time Supabase Realtime subscription + focus/interval sync for logged-in user
   useEffect(() => {
     if (!user) return;
+    refreshNotifications();
+
     const channel = supabase
       .channel(`app-live-${user.id}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${user.id}` },
         (payload) => {
           const row = payload.new as { sender_id?: string; receiver_id?: string; message?: string };
-          if (row.receiver_id === user.id || (row.sender_id && row.sender_id !== user.id)) {
-            showToast(`New message: "${String(row.message || '').slice(0, 45)}"`);
+          if (row.sender_id !== user.id) {
+            const snippet = String(row.message || '').slice(0, 60);
+            showToast(`New message: "${snippet}"`);
+            triggerBrowserNotification('New message on Afri Student Mart', snippet);
             refreshUnread();
+            refreshNotifications();
           }
         }
       )
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications' },
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
         (payload) => {
-          const row = payload.new as { user_id?: string; title?: string; body?: string; type?: string };
-          if (row.user_id === user.id) {
-            showToast(`${row.title || 'Update'}: ${row.body || ''}`);
-            if (row.type === 'want_alert_match') {
-              fetchItemsPage(1, false);
-              fetchHotDeals();
-            }
+          const row = payload.new as {
+            id?: string;
+            user_id?: string;
+            title?: string;
+            body?: string;
+            type?: UserNotification['type'];
+            created_at?: string;
+          };
+          const title = row.title || 'Update';
+          const body = row.body || '';
+          showToast(`${title}: ${body}`);
+          triggerBrowserNotification(title, body);
+          setNotifications((prev) => [
+            {
+              id: String(row.id || `rt_${Date.now()}`),
+              user_id: user.id,
+              title,
+              body,
+              type: row.type || 'info',
+              read: false,
+              created_at: row.created_at || new Date().toISOString(),
+            },
+            ...prev.filter((n) => n.id !== String(row.id)),
+          ]);
+          setUnreadNotificationsCount((c) => c + 1);
+          if (row.type === 'want_alert_match') {
+            fetchItemsPage(1, false);
+            fetchHotDeals();
           }
         }
       )
       .subscribe();
 
+    const onWindowFocus = () => {
+      if (document.visibilityState === 'visible') {
+        refreshUnread();
+        refreshNotifications();
+      }
+    };
+    window.addEventListener('focus', onWindowFocus);
+    const pollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refreshNotifications();
+      }
+    }, 25000);
+
     return () => {
+      window.removeEventListener('focus', onWindowFocus);
+      clearInterval(pollTimer);
       supabase.removeChannel(channel);
     };
-  }, [user?.id, fetchItemsPage, fetchHotDeals]);
+  }, [
+    user?.id,
+    fetchItemsPage,
+    fetchHotDeals,
+    refreshUnread,
+    refreshNotifications,
+    showToast,
+    triggerBrowserNotification,
+  ]);
 
   // Client-side instant filter over currently loaded/cached items (0ms responsiveness offline or typing)
   const filteredItems = useMemo(() => {
@@ -806,10 +939,65 @@ export default function App() {
     setUser(null);
     setCartCheckoutActive(false);
     setUnreadCount(0);
+    setNotifications([]);
+    setUnreadNotificationsCount(0);
+    setNotificationsOpen(false);
     setWishlistIds([]);
     setActiveChatTarget(null);
     setActiveTab('home');
     showToast('Signed out.');
+  };
+
+  const handleOpenNotificationItem = async (notif: UserNotification) => {
+    if (!notif.read) {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notif.id ? { ...n, read: true } : n))
+      );
+      setUnreadNotificationsCount((c) => Math.max(0, c - 1));
+      await api.markNotificationRead(notif.id).catch(() => {});
+    }
+    setNotificationsOpen(false);
+    if (notif.type === 'new_message') {
+      setActiveTab('chat');
+    } else if (
+      notif.type === 'order_placed' ||
+      notif.type === 'order_shipped' ||
+      notif.type === 'order_confirmed' ||
+      notif.type === 'refund_update' ||
+      notif.type === 'offer_received' ||
+      notif.type === 'offer_update' ||
+      notif.type === 'booking_received'
+    ) {
+      setActiveTab('profile');
+    } else if (notif.type === 'want_alert_match') {
+      setActiveTab('home');
+      fetchItemsPage(1, false);
+    }
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnreadNotificationsCount(0);
+    await api.markAllNotificationsRead(unreadIds).catch(() => {});
+  };
+
+  const handleEnableBrowserAlerts = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      showToast('Browser alerts are not supported on this device.');
+      return;
+    }
+    try {
+      const perm = await window.Notification.requestPermission();
+      setBrowserNotifPermission(perm);
+      if (perm === 'granted') {
+        showToast('Browser alerts enabled! You will be notified of new messages & orders.');
+      } else {
+        showToast('Browser alert permission denied. In-app bell notifications remain active.');
+      }
+    } catch {
+      showToast('Could not enable browser alerts.');
+    }
   };
 
   const renderFeedGrid = (list: MarketplaceItem[]) => (
@@ -993,6 +1181,127 @@ export default function App() {
               </span>
             </button>
 
+            <div ref={notifPanelRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!user) {
+                    setAuthMode('login');
+                    setAuthModalOpen(true);
+                    showToast('Login or sign up to view your notifications & price alerts.');
+                    return;
+                  }
+                  const next = !notificationsOpen;
+                  setNotificationsOpen(next);
+                  if (next) {
+                    void refreshNotifications(true);
+                  }
+                }}
+                aria-label="Notifications"
+                aria-expanded={notificationsOpen}
+                className="relative min-h-[38px] px-2.5 rounded-xl border border-green-700/30 bg-green-50 text-green-900 text-xs font-extrabold inline-flex items-center gap-1 hover:bg-green-100 whitespace-nowrap shrink-0"
+              >
+                <Bell className="w-4 h-4 text-green-700 shrink-0" />
+                {unreadNotificationsCount > 0 && (
+                  <span className="rounded-full bg-orange-500 px-1.5 py-0.5 text-[11px] font-extrabold text-white tabular-nums leading-none">
+                    {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                  </span>
+                )}
+              </button>
+
+              {notificationsOpen && user && (
+                <div className="fixed sm:absolute right-2 sm:right-0 left-2 sm:left-auto top-15 sm:top-12 z-50 sm:w-96 rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 bg-slate-50">
+                    <div>
+                      <h3 className="text-sm font-extrabold text-slate-900">Notifications</h3>
+                      <p className="text-[11px] text-slate-500">
+                        {unreadNotificationsCount > 0
+                          ? `${unreadNotificationsCount} unread update(s)`
+                          : 'All caught up'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {unreadNotificationsCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleMarkAllNotificationsRead}
+                          className="text-xs font-bold text-green-800 hover:underline inline-flex items-center gap-1"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Mark all read</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setNotificationsOpen(false)}
+                        aria-label="Close notifications"
+                        className="p-1 text-slate-400 hover:text-slate-700"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {browserNotifPermission === 'default' && (
+                    <div className="bg-blue-50 border-b border-blue-100 px-4 py-2 flex items-center justify-between gap-2 text-xs">
+                      <span className="font-medium text-blue-900">Get instant desktop/phone alerts</span>
+                      <button
+                        type="button"
+                        onClick={handleEnableBrowserAlerts}
+                        className="px-2.5 py-1 rounded-lg bg-blue-600 text-white font-bold text-[11px] hover:bg-blue-700 shrink-0"
+                      >
+                        Enable
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                    {notificationsLoading && notifications.length === 0 ? (
+                      <div className="p-6 text-center text-xs font-semibold text-slate-500">
+                        Loading notifications...
+                      </div>
+                    ) : notifications.length === 0 ? (
+                      <div className="p-6 text-center space-y-1">
+                        <Bell className="w-6 h-6 text-slate-300 mx-auto" />
+                        <p className="text-xs font-bold text-slate-700">No notifications yet</p>
+                        <p className="text-[11px] text-slate-500">
+                          Messages, Paystack escrow updates, offers &amp; price alerts appear here.
+                        </p>
+                      </div>
+                    ) : (
+                      notifications.map((notif) => (
+                        <button
+                          key={notif.id}
+                          type="button"
+                          onClick={() => handleOpenNotificationItem(notif)}
+                          className={`w-full text-left px-4 py-3 hover:bg-green-50/60 transition-colors flex items-start gap-2.5 ${
+                            notif.read ? 'bg-white' : 'bg-green-50/40'
+                          }`}
+                        >
+                          <span
+                            className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${
+                              notif.read ? 'bg-slate-300' : 'bg-orange-500'
+                            }`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-extrabold text-slate-900 truncate">
+                                {notif.title}
+                              </span>
+                              <span className="text-[10px] font-medium text-slate-400 shrink-0">
+                                {formatTimeAgo(notif.created_at)}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-600 mt-0.5 line-clamp-2">{notif.body}</p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               type="button"
               onClick={() => setCartOpen(true)}
@@ -1077,17 +1386,32 @@ export default function App() {
                         </p>
                       </div>
 
-                      {/* Search Bar */}
-                      <div className="relative">
-                        <Search className="w-5 h-5 text-slate-500 absolute left-4 top-1/2 -translate-y-1/2" />
+                      {/* Search Bar (Press Enter or click Search) */}
+                      <form onSubmit={handleHomeSearchSubmit} className="relative flex items-center">
+                        <Search className="w-5 h-5 text-slate-500 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                         <input
+                          ref={homeSearchInputRef}
                           type="search"
+                          enterKeyHint="search"
+                          aria-label={t('search_placeholder')}
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleHomeSearchSubmit();
+                            }
+                          }}
                           placeholder={t('search_placeholder')}
-                          className="w-full min-h-[50px] rounded-2xl bg-white text-slate-900 pl-12 pr-4 text-base font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                          className="w-full min-h-[50px] rounded-2xl bg-white text-slate-900 pl-12 pr-24 text-base font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
                         />
-                      </div>
+                        <button
+                          type="submit"
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 min-h-[38px] px-3.5 rounded-xl bg-green-700 text-white text-xs font-extrabold hover:bg-green-800"
+                        >
+                          Search
+                        </button>
+                      </form>
 
                       <div className="flex flex-wrap items-center gap-2.5">
                         <button
@@ -1529,6 +1853,7 @@ export default function App() {
                 </section>
 
                 {/* Marketplace Feed (10 products loaded first, next 10 on scroll) */}
+                <div ref={homeFeedRef} id="home-marketplace-feed" className="scroll-mt-20">
                 {loadingItems ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {[1, 2, 3].map((n) => (
@@ -1637,6 +1962,51 @@ export default function App() {
                     )}
                   </div>
                 )}
+                </div>
+
+                {/* SEO & Marketplace Key Features Section */}
+                <section
+                  aria-label="Why Choose Afri Student Mart"
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5 space-y-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-base sm:text-lg font-extrabold text-green-950">
+                      Afri Student Mart — Your Market. Your Hustle. All In One Place.
+                    </h2>
+                    <span className="text-xs font-bold text-green-800">Exclusively for Africa</span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                    Buy Food, Clothes, Shoes, Bags, Textbooks, Phone Accessories, Beauty Products &amp;
+                    sell your products. Find trusted campus &amp; local services: Laundry, Hair &amp;
+                    Makeup, Phone Repair, Tutoring, Delivery, Photography, Graphic Design, Plumbing,
+                    and Electrical Work.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
+                    {[
+                      { icon: UserPlus, title: 'FREE to Join & Sign Up', desc: 'Join in seconds as a Student, Trader, or Service Provider.' },
+                      { icon: ShieldCheck, title: 'Trusted Payment - Safe & Secure', desc: 'Protected Paystack Escrow keeps your money safe until delivery.' },
+                      { icon: PlayCircle, title: 'Live Video - Show products live', desc: 'Watch real live video clips of every item before you buy.' },
+                      { icon: Store, title: 'Your Own Online Shop - Like physical store', desc: 'Open your branded Trader Shop & reach thousands of buyers.' },
+                      { icon: Globe, title: 'Pick Your Language of Preference', desc: 'Use the site in your own language across West & South Africa.' },
+                      { icon: TrendingUp, title: 'Get Customers Every Day', desc: 'Reach students & local shoppers across campuses & markets daily.' },
+                      { icon: CheckCircle2, title: 'Safe, Easy & Trusted', desc: 'Verified profiles, instant buyer-seller chat & real reviews.' },
+                    ].map((feat) => {
+                      const FeatIcon = feat.icon;
+                      return (
+                        <div
+                          key={feat.title}
+                          className="rounded-xl border border-slate-200 bg-white p-3 flex items-start gap-2.5"
+                        >
+                          <FeatIcon className="w-4 h-4 text-green-700 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-extrabold text-slate-900">{feat.title}</div>
+                            <div className="text-[11px] text-slate-600 mt-0.5">{feat.desc}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
               </div>
             )}
 
@@ -1830,8 +2200,10 @@ export default function App() {
             {t('chat_footer_note')}
           </div>
 
-          <div className="border-t border-slate-200 pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500">
-            <span>Afri Student Mart - West &amp; South Africa Student Marketplace</span>
+          <div className="border-t border-slate-200 pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-600">
+            <span className="font-semibold">
+              Afri Student Mart is owned by JOKEY PERKY GROUP - FRESH EXPERIENCES HAPPY PEOPLE, Exclusively for Africa.
+            </span>
             <span className="font-bold text-green-900">Powered by JOKEY PERKY GROUP</span>
           </div>
         </div>
@@ -1920,6 +2292,7 @@ export default function App() {
                 setActiveTab('profile');
               }
               refreshUnread();
+              refreshNotifications();
               fetchWishlist();
               showToast(`Welcome, ${loggedInUser.full_name}!`);
             }}

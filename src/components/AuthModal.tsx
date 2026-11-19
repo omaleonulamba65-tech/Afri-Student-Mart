@@ -1356,7 +1356,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                               key={i}
                               className="relative aspect-square rounded-xl overflow-hidden border border-slate-200"
                             >
-                              <img src={src} alt="" className="w-full h-full object-cover" />
+                              <img src={src} alt={`Work sample ${i + 1}`} className="w-full h-full object-cover" />
                               <button
                                 type="button"
                                 onClick={() =>

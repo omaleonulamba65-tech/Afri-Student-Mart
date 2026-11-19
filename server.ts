@@ -132,6 +132,40 @@ async function startServer() {
     res.type('text/plain').send(`google.com, ${pub || 'pub-0000000000000000'}, DIRECT, f08c47fec0942fa0\n`);
   });
 
+  const resolveOrigin = (req: Request) => {
+    const configured = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
+    if (configured) return configured;
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
+    const host = String(req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000').split(',')[0].trim();
+    return `${proto}://${host}`;
+  };
+
+  app.get('/robots.txt', (req: Request, res: Response) => {
+    const origin = resolveOrigin(req);
+    res.type('text/plain').send(
+      `User-agent: *\nAllow: /\nDisallow: /owner-dashboard\nDisallow: /api/\n\nSitemap: ${origin}/sitemap.xml\n`
+    );
+  });
+
+  app.get('/sitemap.xml', (req: Request, res: Response) => {
+    const origin = resolveOrigin(req);
+    const today = new Date().toISOString().slice(0, 10);
+    const urls = [
+      { loc: `${origin}/`, changefreq: 'daily', priority: '1.0' },
+      { loc: `${origin}/?tab=markets`, changefreq: 'daily', priority: '0.9' },
+      { loc: `${origin}/?tab=services`, changefreq: 'daily', priority: '0.9' },
+      { loc: `${origin}/?tab=shop`, changefreq: 'daily', priority: '0.8' },
+      { loc: `${origin}/?tab=post`, changefreq: 'weekly', priority: '0.7' },
+    ];
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls
+      .map(
+        (u) =>
+          `  <url>\n    <loc>${u.loc}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>\n  </url>`
+      )
+      .join('\n')}\n</urlset>\n`;
+    res.type('application/xml').send(xml);
+  });
+
   // === AUTH ===
   app.post('/api/auth/signup', async (req: Request, res: Response) => {
     try {

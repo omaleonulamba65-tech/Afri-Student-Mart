@@ -172,16 +172,24 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
           </button>
         </div>
 
-        <div className="relative">
-          <Search className="w-5 h-5 text-slate-500 absolute left-4 top-1/2 -translate-y-1/2" />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            (document.activeElement as HTMLElement | null)?.blur?.();
+          }}
+          className="relative"
+        >
+          <Search className="w-5 h-5 text-slate-500 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="search"
+            enterKeyHint="search"
+            aria-label="Find a service"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Find a service (Hair, Plumbing, Tutoring, Photography...)"
             className="w-full min-h-[50px] rounded-2xl bg-white text-slate-900 pl-12 pr-4 text-base font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400"
           />
-        </div>
+        </form>
       </section>
 
       {errMsg && (
@@ -276,7 +284,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                 <img
                   key={i}
                   src={src}
-                  alt=""
+                  alt={`Service work sample ${i + 1}`}
                   className="w-16 h-16 rounded-xl object-cover border border-slate-200"
                 />
               ))}

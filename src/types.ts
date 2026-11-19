@@ -485,3 +485,26 @@ export type PolicyPageId =
   | 'cookies'
   | 'contact'
   | 'report';
+
+export type NotificationType =
+  | 'new_message'
+  | 'want_alert_match'
+  | 'order_placed'
+  | 'order_shipped'
+  | 'order_confirmed'
+  | 'refund_update'
+  | 'offer_received'
+  | 'offer_update'
+  | 'booking_received'
+  | 'info';
+
+export interface UserNotification {
+  id: string;
+  user_id: string;
+  title: string;
+  body: string;
+  type: NotificationType;
+  read: boolean;
+  created_at: string;
+  synthetic?: boolean;
+}

@@ -712,7 +712,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       {ord.item_photo && (
                         <img
                           src={ord.item_photo}
-                          alt=""
+                          alt={ord.item_title}
+                          loading="lazy"
+                          decoding="async"
                           className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0"
                         />
                       )}
@@ -1371,7 +1373,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   {(it.thumbnails?.[0] || it.photos?.[0]) && (
                     <img
                       src={it.thumbnails?.[0] || it.photos?.[0]}
-                      alt=""
+                      alt={it.title}
+                      loading="lazy"
+                      decoding="async"
                       className="w-12 h-12 rounded-lg object-cover shrink-0"
                     />
                   )}
@@ -1576,7 +1580,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 {it.photos?.[0] && (
                   <img
                     src={it.photos[0]}
-                    alt=""
+                    alt={it.title}
+                    loading="lazy"
+                    decoding="async"
                     className="w-14 h-14 rounded-xl object-cover border border-slate-200 shrink-0"
                   />
                 )}

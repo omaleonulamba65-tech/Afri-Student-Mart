@@ -383,7 +383,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
                 >
                   <img
                     src={activeItem.thumbnails?.[i] || p}
-                    alt=""
+                    alt={`${activeItem.title} photo ${i + 1}`}
                     loading="lazy"
                     decoding="async"
                     className="w-full h-full object-cover"

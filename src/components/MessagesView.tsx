@@ -258,7 +258,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             </button>
             <div className="w-9 h-9 rounded-full bg-yellow-400 text-green-950 font-bold flex items-center justify-center overflow-hidden shrink-0">
               {chatPartner?.profile_pic ? (
-                <img src={chatPartner.profile_pic} alt="" className="w-full h-full object-cover" />
+                <img src={chatPartner.profile_pic} alt={chatPartner.full_name || 'Chat partner'} className="w-full h-full object-cover" />
               ) : (
                 <User className="w-5 h-5" />
               )}
@@ -536,7 +536,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               >
                 <div className="w-14 h-14 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200">
                   {t.item_photo ? (
-                    <img src={t.item_photo} alt="" className="w-full h-full object-cover" />
+                    <img src={t.item_photo} alt={t.item_title || t.partner_name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-slate-400">
                       <MessageCircle className="w-5 h-5" />

@@ -8,6 +8,7 @@ import type {
   ItemFilterMode,
   ItemOffer,
   MarketplaceItem,
+  NotificationType,
   OwnerActiveSeller,
   OwnerDashboardData,
   OwnerPopularProduct,
@@ -20,6 +21,7 @@ import type {
   ServiceBooking,
   ServiceProvider,
   TraderShop,
+  UserNotification,
   WantAlert,
 } from '../types';
 import { inferCountryFromLocationText } from '../data/countryDocuments';
@@ -720,6 +722,48 @@ async function getAuthenticatedUser(): Promise<PublicUser> {
     throw new Error('Account suspended due to policy reports.');
   }
   return pub;
+}
+
+const SYNTHETIC_READ_KEY = 'afri_mart_read_notifs';
+
+function getReadSyntheticNotifIds(): Set<string> {
+  try {
+    const raw = sessionStorage.getItem(SYNTHETIC_READ_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed.map(String)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveReadSyntheticNotifIds(ids: Set<string>) {
+  try {
+    sessionStorage.setItem(SYNTHETIC_READ_KEY, JSON.stringify(Array.from(ids).slice(-100)));
+  } catch {
+    // Ignore storage issues
+  }
+}
+
+async function createNotificationRecord(payload: {
+  user_id?: string | null;
+  title: string;
+  body: string;
+  type: NotificationType;
+}): Promise<void> {
+  const targetId = (payload.user_id || '').trim();
+  if (!targetId || !isUuid(targetId)) return;
+  try {
+    await supabase.from('notifications').insert({
+      user_id: targetId,
+      title: payload.title,
+      body: payload.body,
+      type: payload.type,
+      read: false,
+    });
+  } catch {
+    // Optional if table not yet created in Supabase
+  }
 }
 
 function mapSupabaseItemRow(
@@ -1564,6 +1608,15 @@ export const api = {
       throw new Error(error?.message || 'Could not submit offer.');
     }
     const r = data as Record<string, unknown>;
+    const sellerUid = isUuid(String(row.seller_id || '')) ? String(row.seller_id) : '';
+    if (sellerUid && sellerUid !== me.id) {
+      await createNotificationRecord({
+        user_id: sellerUid,
+        title: `New Offer on ${String(row.title || 'your item')}`,
+        body: `${me.full_name} offered ${formatCountryMoney(Number(payload.offered_price), String(row.country || me.country || 'Nigeria'))}`,
+        type: 'offer_received',
+      });
+    }
     return {
       offer: {
         id: String(r.id),
@@ -1605,6 +1658,18 @@ export const api = {
       throw new Error(error?.message || 'Could not update offer.');
     }
     const r = data as Record<string, unknown>;
+    if (typeof r.buyer_id === 'string' && isUuid(r.buyer_id)) {
+      const nextStatusLabel = statusMap[payload.action];
+      await createNotificationRecord({
+        user_id: r.buyer_id,
+        title: `Offer ${nextStatusLabel}: ${String(r.item_title || 'Marketplace Item')}`,
+        body:
+          payload.action === 'counter' && payload.counter_price
+            ? `Seller sent a counter-offer of ${formatCountryMoney(payload.counter_price)}`
+            : `Seller ${nextStatusLabel} your offer of ${formatCountryMoney(Number(r.offered_price || 0))}`,
+        type: 'offer_update',
+      });
+    }
     return {
       offer: {
         id: String(r.id),
@@ -1842,6 +1907,14 @@ export const api = {
       : [];
 
     const r = data as Record<string, unknown>;
+    if (matches.length > 0) {
+      await createNotificationRecord({
+        user_id: me.id,
+        title: `Price Alert Match (${payload.keyword.trim()})`,
+        body: `${matches.length} listing(s) found under ${formatCountryMoney(Number(payload.max_price), me.country)}: "${matches[0].item_title}"`,
+        type: 'want_alert_match',
+      });
+    }
     return {
       alert: {
         id: String(r.id),
@@ -2109,6 +2182,15 @@ export const api = {
       .single();
 
     if (error || !data) throw new Error(error?.message || 'Booking failed.');
+    const providerUid = (svc as { provider_id?: string } | null)?.provider_id || '';
+    if (providerUid && providerUid !== me.id) {
+      await createNotificationRecord({
+        user_id: providerUid,
+        title: `New Service Booking: ${payload.service_name}`,
+        body: `${me.full_name} booked for ${payload.scheduled_day} at ${payload.location}`,
+        type: 'booking_received',
+      });
+    }
     const b = data as Record<string, unknown>;
     return {
       booking: {
@@ -3193,6 +3275,15 @@ export const api = {
       throw new Error(error?.message || 'Could not record Paystack order in Supabase.');
     }
 
+    if (isUuid(item.seller_id) && item.seller_id !== me.id) {
+      await createNotificationRecord({
+        user_id: item.seller_id,
+        title: `New Escrow Order: ${item.title}`,
+        body: `${me.full_name} paid ${formatCountryMoney(totalAmount, item.country)}. Deliver to ${payload.delivery_address}.`,
+        type: 'order_placed',
+      });
+    }
+
     const o = data as Record<string, unknown>;
     return {
       order: {
@@ -3231,6 +3322,14 @@ export const api = {
       .single();
     if (error || !data) throw new Error(error?.message || 'Failed to update order.');
     const o = data as Record<string, unknown>;
+    if (typeof o.buyer_id === 'string' && isUuid(o.buyer_id)) {
+      await createNotificationRecord({
+        user_id: o.buyer_id,
+        title: `Order Shipped: ${String(o.item_title || 'Your item')}`,
+        body: `Seller marked order ${String(o.reference || '')} as shipped. Confirm receipt once delivered.`,
+        type: 'order_shipped',
+      });
+    }
     return {
       order: {
         id: String(o.id),
@@ -3267,6 +3366,14 @@ export const api = {
       .single();
     if (error || !data) throw new Error(error?.message || 'Failed to confirm delivery.');
     const o = data as Record<string, unknown>;
+    if (typeof o.seller_id === 'string' && isUuid(o.seller_id)) {
+      await createNotificationRecord({
+        user_id: o.seller_id,
+        title: `Delivery Confirmed: ${String(o.item_title || 'Order')}`,
+        body: `Buyer confirmed delivery for order ${String(o.reference || '')}. Your payout has been released.`,
+        type: 'order_confirmed',
+      });
+    }
     return {
       order: {
         id: String(o.id),
@@ -3316,6 +3423,14 @@ export const api = {
       .single();
     if (error || !data) throw new Error(error?.message || 'Failed to request refund.');
     const o = data as Record<string, unknown>;
+    if (typeof o.seller_id === 'string' && isUuid(o.seller_id)) {
+      await createNotificationRecord({
+        user_id: o.seller_id,
+        title: `Refund Requested: ${String(o.item_title || 'Order')}`,
+        body: `Reason: ${String(o.refund_reason || 'Customer requested refund')}`,
+        type: 'refund_update',
+      });
+    }
     return {
       order: {
         id: String(o.id),
@@ -3359,6 +3474,20 @@ export const api = {
       .single();
     if (error || !data) throw new Error(error?.message || 'Failed to resolve refund.');
     const o = data as Record<string, unknown>;
+    if (typeof o.buyer_id === 'string' && isUuid(o.buyer_id)) {
+      await createNotificationRecord({
+        user_id: o.buyer_id,
+        title:
+          decision === 'reject'
+            ? `Refund Request Rejected: ${String(o.item_title || 'Order')}`
+            : `Refund Approved: ${String(o.item_title || 'Order')}`,
+        body:
+          decision === 'reject'
+            ? `Order ${String(o.reference || '')} remains active in escrow.`
+            : `Refund for order ${String(o.reference || '')} has been approved via Paystack (3-5 working days).`,
+        type: 'refund_update',
+      });
+    }
     return {
       order: {
         id: String(o.id),
@@ -3409,6 +3538,166 @@ export const api = {
     const { error } = await supabase.from('ad_settings').upsert(payload, { onConflict: 'id' });
     if (error) throw new Error(error.message);
     return { settings: payload };
+  },
+
+  getNotifications: async (): Promise<{
+    notifications: UserNotification[];
+    unread_count: number;
+  }> => {
+    const me = await getAuthenticatedUser().catch(() => null);
+    if (!me) return { notifications: [], unread_count: 0 };
+
+    const seenIds = getReadSyntheticNotifIds();
+    const list: UserNotification[] = [];
+
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', me.id)
+      .order('created_at', { ascending: false })
+      .limit(40);
+
+    if (!error && Array.isArray(data)) {
+      for (const r of data as Array<Record<string, unknown>>) {
+        list.push({
+          id: String(r.id),
+          user_id: String(r.user_id || me.id),
+          title: String(r.title || 'Update'),
+          body: String(r.body || ''),
+          type: String(r.type || 'info') as NotificationType,
+          read: Boolean(r.read),
+          created_at: String(r.created_at || new Date().toISOString()),
+        });
+      }
+    }
+
+    // Supplement with live unread messages & recent order/offer activity so notifications always work even before SQL migration
+    if (list.length === 0) {
+      const [msgRes, ordRes, offersRes] = await Promise.all([
+        supabase
+          .from('messages')
+          .select('id, sender_id, receiver_id, sender_phone, message, read_by_recipient, created_at')
+          .eq('receiver_id', me.id)
+          .eq('read_by_recipient', false)
+          .order('created_at', { ascending: false })
+          .limit(10),
+        supabase
+          .from('orders')
+          .select('id, item_title, order_status, buyer_id, seller_id, buyer_name, total_amount, created_at')
+          .or(`buyer_id.eq.${me.id},seller_id.eq.${me.id}`)
+          .order('created_at', { ascending: false })
+          .limit(8),
+        supabase
+          .from('offers')
+          .select('id, item_title, buyer_id, seller_id, buyer_name, offered_price, status, created_at')
+          .or(`buyer_id.eq.${me.id},seller_id.eq.${me.id}`)
+          .order('created_at', { ascending: false })
+          .limit(8),
+      ]);
+
+      if (!msgRes.error && Array.isArray(msgRes.data)) {
+        for (const m of msgRes.data as Array<Record<string, unknown>>) {
+          const synId = `syn_msg_${m.id}`;
+          list.push({
+            id: synId,
+            user_id: me.id,
+            title: 'New Unread Message',
+            body: String(m.message || '').slice(0, 100),
+            type: 'new_message',
+            read: seenIds.has(synId),
+            created_at: String(m.created_at || new Date().toISOString()),
+            synthetic: true,
+          });
+        }
+      }
+
+      if (!ordRes.error && Array.isArray(ordRes.data)) {
+        for (const o of ordRes.data as Array<Record<string, unknown>>) {
+          const synId = `syn_ord_${o.id}_${o.order_status}`;
+          const isBuyer = o.buyer_id === me.id;
+          list.push({
+            id: synId,
+            user_id: me.id,
+            title: isBuyer
+              ? `Order ${String(o.order_status || '').replace(/_/g, ' ')}`
+              : `Seller Order: ${String(o.item_title || 'Item')}`,
+            body: isBuyer
+              ? `${String(o.item_title || 'Order')} (${formatCountryMoney(Number(o.total_amount || 0), me.country)})`
+              : `${String(o.buyer_name || 'Buyer')} ordered ${String(o.item_title || 'Item')}`,
+            type:
+              o.order_status === 'shipped'
+                ? 'order_shipped'
+                : o.order_status === 'delivered_confirmed'
+                ? 'order_confirmed'
+                : 'order_placed',
+            read: seenIds.has(synId),
+            created_at: String(o.created_at || new Date().toISOString()),
+            synthetic: true,
+          });
+        }
+      }
+
+      if (!offersRes.error && Array.isArray(offersRes.data)) {
+        for (const ofr of offersRes.data as Array<Record<string, unknown>>) {
+          const synId = `syn_ofr_${ofr.id}_${ofr.status}`;
+          const isSeller = ofr.seller_id === me.id;
+          list.push({
+            id: synId,
+            user_id: me.id,
+            title: isSeller
+              ? `Offer on ${String(ofr.item_title || 'Item')}`
+              : `Offer ${String(ofr.status || 'pending')}`,
+            body: `${String(ofr.buyer_name || 'Buyer')} offered ${formatCountryMoney(Number(ofr.offered_price || 0), me.country)}`,
+            type: isSeller ? 'offer_received' : 'offer_update',
+            read: seenIds.has(synId),
+            created_at: String(ofr.created_at || new Date().toISOString()),
+            synthetic: true,
+          });
+        }
+      }
+    }
+
+    list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const unread_count = list.filter((n) => !n.read).length;
+    return { notifications: list, unread_count };
+  },
+
+  markNotificationRead: async (notificationId: string): Promise<{ ok: boolean }> => {
+    if (notificationId.startsWith('syn_')) {
+      const ids = getReadSyntheticNotifIds();
+      ids.add(notificationId);
+      saveReadSyntheticNotifIds(ids);
+      return { ok: true };
+    }
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('id', notificationId);
+    if (error) {
+      const ids = getReadSyntheticNotifIds();
+      ids.add(notificationId);
+      saveReadSyntheticNotifIds(ids);
+    }
+    return { ok: true };
+  },
+
+  markAllNotificationsRead: async (idsToMark?: string[]): Promise<{ ok: boolean }> => {
+    const me = await getAuthenticatedUser().catch(() => null);
+    if (!me) return { ok: true };
+    if (Array.isArray(idsToMark) && idsToMark.length > 0) {
+      const synSet = getReadSyntheticNotifIds();
+      for (const id of idsToMark) {
+        if (id.startsWith('syn_')) synSet.add(id);
+      }
+      saveReadSyntheticNotifIds(synSet);
+    }
+    await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('user_id', me.id)
+      .eq('read', false)
+      .then(() => {});
+    return { ok: true };
   },
 
   askMartAI: async (payload: {

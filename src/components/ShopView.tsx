@@ -486,7 +486,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
                     {(prod.thumbnails?.[0] || prod.photos[0]) && (
                       <img
                         src={prod.thumbnails?.[0] || prod.photos[0]}
-                        alt=""
+                        alt={prod.title}
                         loading="lazy"
                         decoding="async"
                         className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0"

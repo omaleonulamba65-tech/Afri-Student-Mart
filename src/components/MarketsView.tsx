@@ -331,16 +331,24 @@ export const MarketsView: React.FC<MarketsViewProps> = ({
         </div>
 
         {/* Search Markets by Market Name, State, or Country */}
-        <div className="relative">
-          <Search className="w-5 h-5 text-slate-500 absolute left-4 top-1/2 -translate-y-1/2" />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            (document.activeElement as HTMLElement | null)?.blur?.();
+          }}
+          className="relative"
+        >
+          <Search className="w-5 h-5 text-slate-500 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="search"
+            enterKeyHint="search"
+            aria-label={t('search_markets_placeholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('search_markets_placeholder')}
             className="w-full min-h-[50px] rounded-2xl bg-white text-slate-900 pl-12 pr-4 text-base font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
           />
-        </div>
+        </form>
       </section>
 
       {/* Country + Region Tabs + State Filter */}
