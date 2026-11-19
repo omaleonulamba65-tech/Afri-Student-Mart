@@ -10,10 +10,12 @@ import {
   Heart,
   LogOut,
   PackageCheck,
+  Radio,
   Rocket,
   Share2,
   Shield,
   ShoppingBag,
+  Square,
   Star,
   Store,
   Tag,
@@ -41,10 +43,12 @@ import {
   AdSettings,
   EscrowOrder,
   ItemOffer,
+  LiveVideo,
   MarketplaceItem,
   PublicUser,
   SERVICE_CATEGORIES,
   ServiceBooking,
+  TraderShop,
   WantAlert,
 } from '../types';
 import { BadgeRow } from './BadgePill';
@@ -104,6 +108,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [savedMsg, setSavedMsg] = useState('');
   const [error, setError] = useState('');
   const [myItems, setMyItems] = useState<MarketplaceItem[]>([]);
+  const [myShop, setMyShop] = useState<TraderShop | null>(null);
+  const [confirmDeleteMyShop, setConfirmDeleteMyShop] = useState(false);
+  const [myLiveVideos, setMyLiveVideos] = useState<LiveVideo[]>([]);
   const [bookings, setBookings] = useState<ServiceBooking[]>([]);
   const [offers, setOffers] = useState<ItemOffer[]>([]);
   const [counterDraft, setCounterDraft] = useState<Record<string, string>>({});
@@ -160,6 +167,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       api
         .getItems({ sellerId: user.id })
         .then((res) => setMyItems(res.items))
+        .catch(() => {});
+      api
+        .getMyShop()
+        .then((res) => setMyShop(res.shop))
+        .catch(() => {});
+      api
+        .getMyLiveVideos()
+        .then((res) => setMyLiveVideos(res.videos))
         .catch(() => {});
       api
         .getBookings()
@@ -388,17 +403,47 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     }
   };
 
-  const handleMarkShipped = async (orderId: string) => {
+  const handleSellerOrderStatus = async (
+    orderId: string,
+    nextStatus: 'confirmed' | 'delivered'
+  ) => {
     setError('');
     setOrderBusyId(orderId);
     try {
-      const res = await api.markOrderShipped(orderId);
-      setSellerOrders((prev) => prev.map((o) => (o.id === orderId ? res.order : o)));
-      onNotice('Order marked as Shipped for campus/city delivery!');
+      await api.updateOrderStatus(orderId, nextStatus);
+      loadOrders();
+      onNotice(
+        nextStatus === 'confirmed'
+          ? 'Order confirmed! Buyer notified.'
+          : 'Order marked Delivered & Payment completed!'
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not mark shipped.');
+      setError(err instanceof Error ? err.message : 'Could not update order status.');
     } finally {
       setOrderBusyId(null);
+    }
+  };
+
+  const handleDeleteShopFromDashboard = async () => {
+    if (!myShop) return;
+    setError('');
+    try {
+      await api.deleteMyShop(myShop.id);
+      setMyShop(null);
+      setConfirmDeleteMyShop(false);
+      onNotice('Shop deleted.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete shop.');
+    }
+  };
+
+  const handleEndLiveFromDashboard = async (liveId: string) => {
+    try {
+      await api.endLiveVideo(liveId);
+      setMyLiveVideos((prev) => prev.map((v) => (v.id === liveId ? { ...v, is_live: false } : v)));
+      onNotice('Live video ended.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not end live video.');
     }
   };
 
@@ -674,6 +719,114 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       )}
 
+      {/* MY SHOP & LIVE VIDEO CONTROLS ON DASHBOARD */}
+      <div className="rounded-2xl border border-orange-200 bg-white p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Store className="w-5 h-5 text-orange-500" />
+            <h3 className="text-lg font-extrabold text-slate-900">My Shop</h3>
+          </div>
+          {onNavigateTab && (
+            <button
+              type="button"
+              onClick={() => onNavigateTab('shop')}
+              className="min-h-[38px] px-3.5 rounded-xl bg-orange-500 text-white text-xs font-extrabold hover:bg-orange-600"
+            >
+              {myShop ? 'Edit Shop' : '+ Create Shop'}
+            </button>
+          )}
+        </div>
+
+        {myShop ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <div className="text-sm font-extrabold text-slate-900 truncate">{myShop.shop_name}</div>
+              <div className="text-slate-600">
+                {myShop.country || user.country} · {myShop.state_city || myShop.market} ·{' '}
+                <strong className="tabular-nums">{myShop.products_count} products</strong>
+              </div>
+              {myShop.description && (
+                <p className="text-slate-600 line-clamp-2">{myShop.description}</p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {confirmDeleteMyShop ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleDeleteShopFromDashboard}
+                    className="min-h-[36px] px-3 rounded-lg bg-red-600 text-white font-extrabold"
+                  >
+                    Confirm Delete
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteMyShop(false)}
+                    className="min-h-[36px] px-2.5 rounded-lg border border-slate-300 font-bold text-slate-700"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteMyShop(true)}
+                  className="min-h-[36px] px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 font-bold inline-flex items-center gap-1 hover:bg-red-100"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Shop</span>
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-600">
+            Open your own online storefront with photos, description, and products synced to Supabase.
+          </p>
+        )}
+
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 font-bold text-slate-800">
+            <Radio className="w-4 h-4 text-red-600" />
+            <span>
+              Live Videos ({myLiveVideos.filter((v) => v.is_live).length} active now)
+            </span>
+          </div>
+          {onNavigateTab && (
+            <button
+              type="button"
+              onClick={() => onNavigateTab('live')}
+              className="min-h-[36px] px-3 rounded-lg bg-red-600 text-white font-extrabold hover:bg-red-700"
+            >
+              Go Live / Manage Streams
+            </button>
+          )}
+        </div>
+
+        {myLiveVideos.filter((v) => v.is_live).length > 0 && (
+          <div className="space-y-2">
+            {myLiveVideos
+              .filter((v) => v.is_live)
+              .map((v) => (
+                <div
+                  key={v.id}
+                  className="rounded-xl border border-red-200 bg-red-50/50 px-3 py-2 flex items-center justify-between gap-2 text-xs"
+                >
+                  <span className="font-bold text-slate-900 truncate">{v.title}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleEndLiveFromDashboard(v.id)}
+                    className="min-h-[32px] px-2.5 rounded-lg bg-red-600 text-white font-extrabold inline-flex items-center gap-1 shrink-0"
+                  >
+                    <Square className="w-3 h-3 fill-white" />
+                    <span>End Live</span>
+                  </button>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+
       {/* MY ORDERS (Escrow Held, Confirm Delivery, Request Refund + Upload Photo) */}
       <div className="rounded-2xl border border-green-300 bg-white p-5 space-y-3">
         <div className="flex items-center justify-between gap-2">
@@ -720,10 +873,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       )}
                       <div className="min-w-0">
                         <div className="text-sm font-extrabold text-slate-900 truncate">
-                          {ord.item_title}
+                          {ord.item_title} {(ord.quantity || 1) > 1 ? `(${ord.quantity}x)` : ''}
                         </div>
                         <div className="text-slate-600">
-                          Seller: {ord.seller_name} · Ref: <span className="font-mono">{ord.reference}</span>
+                          Seller: {ord.seller_name} · {ord.payment_method || 'Card'} · Payment:{' '}
+                          <strong className="uppercase">{ord.payment_status || 'pending'}</strong>
                         </div>
                         <div className="font-extrabold text-green-800 tabular-nums mt-0.5">
                           Total Paid: {formatMoney(ord.total_amount, ord.country)} (Item{' '}
@@ -734,9 +888,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </div>
                     <span
                       className={`rounded-md px-2 py-1 text-[10px] font-extrabold uppercase shrink-0 ${
-                        ord.order_status === 'delivered_confirmed'
+                        ord.order_status === 'delivered_confirmed' || ord.status === 'delivered'
                           ? 'bg-green-700 text-white'
-                          : ord.order_status === 'shipped'
+                          : ord.order_status === 'shipped' || ord.status === 'confirmed'
                           ? 'bg-blue-600 text-white'
                           : ord.order_status === 'refund_requested'
                           ? 'bg-orange-500 text-white'
@@ -745,7 +899,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                           : 'bg-green-100 text-green-900'
                       }`}
                     >
-                      {ord.order_status.replace(/_/g, ' ')}
+                      {ord.status || ord.order_status.replace(/_/g, ' ')}
                     </span>
                   </div>
 
@@ -918,38 +1072,59 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </div>
 
           <div className="space-y-2.5">
-            {sellerOrders.map((ord) => (
-              <div
-                key={ord.id}
-                className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2 text-xs"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-extrabold text-slate-900 truncate">{ord.item_title}</span>
-                  <span className="rounded bg-white border border-slate-200 px-2 py-0.5 font-bold uppercase text-[10px]">
-                    {ord.order_status.replace(/_/g, ' ')}
-                  </span>
+            {sellerOrders.map((ord) => {
+              const simpleStatus =
+                ord.status ||
+                (ord.order_status === 'delivered_confirmed'
+                  ? 'delivered'
+                  : ord.order_status === 'shipped'
+                  ? 'confirmed'
+                  : 'pending');
+              return (
+                <div
+                  key={ord.id}
+                  className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2 text-xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-extrabold text-slate-900 truncate">
+                      {ord.item_title} {(ord.quantity || 1) > 1 ? `(${ord.quantity}x)` : ''}
+                    </span>
+                    <span className="rounded bg-white border border-slate-200 px-2 py-0.5 font-bold uppercase text-[10px]">
+                      {simpleStatus} · {ord.payment_status || 'pending'}
+                    </span>
+                  </div>
+                  <div className="text-slate-600">
+                    Buyer: <strong>{ord.buyer_name}</strong> · {ord.payment_method || 'Card'} · Deliver to:{' '}
+                    {ord.delivery_address}
+                  </div>
+                  <div className="font-bold text-green-800 tabular-nums">
+                    Your Payout: {formatMoney(ord.seller_payout, ord.country)}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {simpleStatus === 'pending' && (
+                      <button
+                        type="button"
+                        disabled={orderBusyId === ord.id}
+                        onClick={() => handleSellerOrderStatus(ord.id, 'confirmed')}
+                        className="min-h-[38px] px-4 rounded-lg bg-blue-600 text-white font-extrabold text-xs hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {orderBusyId === ord.id ? 'Updating...' : 'Confirm Order'}
+                      </button>
+                    )}
+                    {simpleStatus === 'confirmed' && (
+                      <button
+                        type="button"
+                        disabled={orderBusyId === ord.id}
+                        onClick={() => handleSellerOrderStatus(ord.id, 'delivered')}
+                        className="min-h-[38px] px-4 rounded-lg bg-green-700 text-white font-extrabold text-xs hover:bg-green-800 disabled:opacity-60"
+                      >
+                        {orderBusyId === ord.id ? 'Updating...' : 'Mark Delivered'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="text-slate-600">
-                  Buyer: <strong>{ord.buyer_name}</strong> · Deliver to: {ord.delivery_address}
-                </div>
-                <div className="font-bold text-green-800 tabular-nums">
-                  Your 93% Split Payout: {formatMoney(ord.seller_payout, ord.country)}{' '}
-                  <span className="text-slate-500 font-normal">
-                    (You will receive 93% after Paystack fee · 7% Owner Split)
-                  </span>
-                </div>
-                {ord.order_status === 'paid_escrow' && (
-                  <button
-                    type="button"
-                    disabled={orderBusyId === ord.id}
-                    onClick={() => handleMarkShipped(ord.id)}
-                    className="min-h-[38px] px-4 rounded-lg bg-green-700 text-white font-extrabold text-xs hover:bg-green-800 disabled:opacity-60"
-                  >
-                    {orderBusyId === ord.id ? 'Updating...' : 'Mark as Shipped (Delivery)'}
-                  </button>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -1570,7 +1745,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
       {/* My Listings */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
-        <h3 className="text-lg font-extrabold text-slate-900">My Posted Items ({myItems.length})</h3>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-lg font-extrabold text-slate-900">My Posted Products ({myItems.length})</h3>
+          {onNavigateTab && (
+            <button
+              type="button"
+              onClick={() => onNavigateTab('post')}
+              className="min-h-[38px] px-3.5 rounded-xl bg-green-700 text-white text-xs font-extrabold hover:bg-green-800"
+            >
+              + Add Product
+            </button>
+          )}
+        </div>
         {myItems.length === 0 ? (
           <p className="text-sm text-slate-500">You have not posted any items yet.</p>
         ) : (

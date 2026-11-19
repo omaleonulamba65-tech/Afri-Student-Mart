@@ -14,33 +14,33 @@ export const ITEM_CONDITIONS: ItemCondition[] = [
 ];
 
 export const ITEM_CATEGORIES = [
-  'Shoes',
-  'Clothes',
-  'Phones',
   'Food',
+  'Clothes',
+  'Shoes',
+  'Bags',
+  'Textbooks',
+  'Phone Accessories',
+  'Beauty Products',
+  'Phones',
   'Books',
   'Electronics',
   'Foodstuff',
   'Fashion',
   'Hostel Items',
-  'Phones & Accessories',
   'Laptops & Computers',
-  'Books & Handouts',
-  'Beauty & Skincare',
   'Services',
   'Others',
 ] as const;
 
 export const HOME_QUICK_CATEGORIES = [
   { id: 'All', label: 'All Items' },
-  { id: 'Shoes', label: 'Shoes' },
-  { id: 'Clothes', label: 'Clothes' },
-  { id: 'Phones', label: 'Phones' },
   { id: 'Food', label: 'Food' },
-  { id: 'Books', label: 'Books' },
-  { id: 'Electronics', label: 'Electronics' },
-  { id: 'Foodstuff', label: 'Foodstuff' },
-  { id: 'Fashion', label: 'Fashion' },
+  { id: 'Clothes', label: 'Clothes' },
+  { id: 'Shoes', label: 'Shoes' },
+  { id: 'Bags', label: 'Bags' },
+  { id: 'Textbooks', label: 'Textbooks' },
+  { id: 'Phone Accessories', label: 'Phone Accessories' },
+  { id: 'Beauty Products', label: 'Beauty Products' },
   { id: '__SERVICES__', label: 'Services Near You' },
 ] as const;
 
@@ -48,14 +48,15 @@ export const STANDARD_DELIVERY_FEE_NGN = 1000;
 export const SAME_CITY_DELIVERY_FEE_NGN = 500;
 
 export const SERVICE_CATEGORIES = [
-  'Hair & Beauty',
-  'Plumbing',
+  'Laundry & Cleaning',
+  'Hair & Makeup',
+  'Phone Repair',
   'Tutoring',
+  'Delivery',
   'Photography',
-  'Cleaning',
-  'Tailoring',
   'Graphic Design',
-  'Car Wash',
+  'Plumbing',
+  'Electrical Work',
 ] as const;
 
 export type ServiceCategory = (typeof SERVICE_CATEGORIES)[number];
@@ -64,12 +65,17 @@ export type ItemCategory = (typeof ITEM_CATEGORIES)[number];
 
 export interface PublicUser {
   id: string;
+  name?: string;
   full_name: string;
   email?: string;
+  phone?: string;
   phone_number?: string; // Private: only returned to self or Owner
   country_code?: string;
   country?: string;
+  state_city?: string;
+  language_of_preference?: string;
   language?: string;
+  user_type?: 'Student' | 'Trader' | 'Service Provider';
   role: UserRole;
   badges: AccountBadge[]; // Up to 2 badges e.g. ['student', 'service_provider']
   institution: string;
@@ -102,14 +108,17 @@ export interface PublicUser {
 
 export interface MarketplaceItem {
   id: string;
+  shop_id?: string;
   title: string;
   category: ItemCategory | string;
   price: number;
   condition: ItemCondition;
   description: string;
+  image_url?: string;
   photos: string[];
   thumbnails?: string[];
   video_url?: string;
+  is_available?: boolean;
   make_offer?: boolean;
   pay_on_delivery?: boolean;
   is_boosted?: boolean;
@@ -207,11 +216,14 @@ export interface ServiceProvider {
   id: string;
   provider_id: string;
   provider_name: string;
+  provider_phone?: string;
   profile_pic: string;
   category: string;
   title: string;
   description: string;
   price_from: number;
+  country?: string;
+  state_city?: string;
   location: string;
   distance_km: number;
   rating: number;
@@ -229,6 +241,7 @@ export interface ServiceBooking {
   service_id: string;
   service_title: string;
   provider_name: string;
+  provider_phone?: string;
   scheduled_day: string;
   location: string;
   notes: string;
@@ -243,6 +256,9 @@ export interface TraderShop {
   owner_id: string;
   owner_name: string;
   shop_name: string;
+  description?: string;
+  country?: string;
+  state_city?: string;
   market: string;
   shop_photo: string;
   whatsapp_phone?: string;
@@ -252,6 +268,35 @@ export interface TraderShop {
   is_featured: boolean;
   products_count: number;
   products: MarketplaceItem[];
+}
+
+export interface LiveVideo {
+  id: string;
+  seller_id: string;
+  seller_name: string;
+  seller_phone?: string;
+  shop_id?: string;
+  shop_name?: string;
+  title: string;
+  description?: string;
+  video_url: string;
+  thumbnail_url?: string;
+  country: string;
+  is_live: boolean;
+  viewers_count: number;
+  created_at: string;
+  ended_at?: string;
+}
+
+export interface PaymentRecord {
+  id: string;
+  order_id: string;
+  payer_id: string;
+  amount: number;
+  payment_method: 'Bank Transfer' | 'Card' | 'Mobile Money' | string;
+  status: 'pending' | 'successful' | 'failed' | string;
+  paystack_reference?: string;
+  created_at: string;
 }
 
 export interface ChatThread {
@@ -330,8 +375,10 @@ export interface EscrowOrder {
   buyer_email: string;
   seller_id: string;
   seller_name: string;
+  quantity?: number;
   product_price: number;
   delivery_fee: number;
+  total_price?: number;
   total_amount: number;
   admin_commission: number;
   admin_total_kept: number;
@@ -342,6 +389,9 @@ export interface EscrowOrder {
   paystack_split_code?: string;
   seller_subaccount_code?: string;
   fee_bearer?: 'all-proportional' | 'subaccount';
+  status?: 'pending' | 'confirmed' | 'delivered';
+  payment_method?: 'Bank Transfer' | 'Card' | 'Mobile Money' | string;
+  payment_status?: 'pending' | 'successful' | 'failed' | string;
   order_status: EscrowOrderStatus;
   refund_reason?: string;
   refund_photo?: string;

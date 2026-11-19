@@ -52,14 +52,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onCartCheckoutSuccess,
 }) => {
   const { country: activeCountry, formatMoney, t } = useI18n();
+  const [singleQuantity, setSingleQuantity] = useState(1);
+  const [paymentMethod, setPaymentMethod] = useState<'Card' | 'Bank Transfer' | 'Mobile Money'>('Card');
   const [deliveryTier, setDeliveryTier] = useState<'same_city' | 'standard'>('same_city');
   const [deliveryAddress, setDeliveryAddress] = useState(
     user?.campus || user?.institution || 'Campus / Main Gate'
   );
   const [buyerEmail, setBuyerEmail] = useState(
-    user?.phone_number
-      ? `student.${user.phone_number}@afristudentmart.ng`
-      : 'student@afristudentmart.ng'
+    user?.email ||
+      (user?.phone_number ? `student.${user.phone_number}@afristudentmart.ng` : 'student@afristudentmart.ng')
   );
   const [processing, setProcessing] = useState(false);
   const [testSheetOpen, setTestSheetOpen] = useState(false);
@@ -73,7 +74,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     cartItems && cartItems.length > 0
       ? cartItems
       : item
-      ? [{ item, quantity: 1 }]
+      ? [{ item, quantity: singleQuantity }]
       : [];
 
   if (effectiveEntries.length === 0) return null;
@@ -85,7 +86,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const cfg = resolvePaystackConfig(adSettings);
   const productPrice = isCartCheckout
     ? effectiveEntries.reduce((sum, entry) => sum + Number(entry.item.price || 0) * entry.quantity, 0)
-    : Number(agreedPrice || primaryItem.price);
+    : Number(agreedPrice || primaryItem.price) * singleQuantity;
   const deliveryFee =
     deliveryTier === 'same_city' ? countryCfg.deliveryFeeSameCity : countryCfg.deliveryFeeStandard;
   const totalAmount = productPrice + deliveryFee;
@@ -110,21 +111,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       for (let i = 0; i < effectiveEntries.length; i++) {
         const entry = effectiveEntries[i];
         const qty = Math.max(1, entry.quantity);
-        for (let q = 0; q < qty; q++) {
-          const itemRef =
-            effectiveEntries.length === 1 && qty === 1
-              ? reference
-              : `${reference}_${i + 1}_${q + 1}`;
-          const res = await api.createOrder({
-            item_id: entry.item.id,
-            delivery_address: deliveryAddress.trim() || entry.item.location,
-            paystack_reference: itemRef,
-            buyer_email: buyerEmail.trim(),
-            delivery_tier: deliveryTier,
-          });
-          lastOrder = res.order;
-          createdCount += 1;
-        }
+        const itemRef = effectiveEntries.length === 1 ? reference : `${reference}_${i + 1}`;
+        const res = await api.createOrder({
+          item_id: entry.item.id,
+          quantity: qty,
+          delivery_address: deliveryAddress.trim() || entry.item.location,
+          paystack_reference: itemRef,
+          buyer_email: buyerEmail.trim(),
+          delivery_tier: deliveryTier,
+          payment_method: paymentMethod,
+        });
+        lastOrder = res.order;
+        createdCount += qty;
       }
       if (lastOrder) {
         setCompletedOrder(lastOrder);
@@ -136,7 +134,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save your Paystack order.');
+      setError(err instanceof Error ? err.message : 'Could not save your order.');
     } finally {
       setProcessing(false);
     }
@@ -158,10 +156,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const ref = `ASM_${Date.now()}_${Math.floor(Math.random() * 9000 + 1000)}`;
     setPendingRef(ref);
 
+    if (paymentMethod !== 'Card') {
+      void finalizeOrder(ref);
+      return;
+    }
+
     // Use Paystack Inline JS with automatic Split Code / Seller Subaccount
     const launched = launchPaystackInline({
       settings: adSettings,
-      email: buyerEmail.trim() || `student.${user.phone_number}@afristudentmart.ng`,
+      email: buyerEmail.trim() || user.email || `student.${user.phone_number}@afristudentmart.ng`,
       amountNaira: totalAmount,
       currency: countryCfg.currencyCode,
       reference: ref,
@@ -173,7 +176,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             variable_name: 'item_title',
             value: isCartCheckout
               ? `${effectiveEntries.length} Cart Items (${primaryItem.title})`
-              : primaryItem.title,
+              : `${singleQuantity}x ${primaryItem.title}`,
           },
           { display_name: 'Delivery Address', variable_name: 'delivery_address', value: deliveryAddress },
           { display_name: `Product Price (${countryCfg.currencyCode})`, variable_name: 'product_price', value: productPrice },
@@ -359,12 +362,56 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     Seller: <strong className="text-slate-800">{primaryItem.seller_name}</strong> ·{' '}
                     {primaryItem.location}
                   </p>
-                  <p className="text-sm font-extrabold text-green-800 tabular-nums mt-1">
-                    {formatMoney(productPrice, itemCountry)}
-                  </p>
+                  <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-extrabold text-green-800 tabular-nums">
+                      {formatMoney(productPrice, itemCountry)}
+                    </p>
+                    <div className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-xs font-extrabold">
+                      <button
+                        type="button"
+                        onClick={() => setSingleQuantity((q) => Math.max(1, q - 1))}
+                        aria-label="Decrease quantity"
+                        className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-800 hover:bg-slate-100"
+                      >
+                        -
+                      </button>
+                      <span className="px-1.5 tabular-nums text-slate-900">Qty {singleQuantity}</span>
+                      <button
+                        type="button"
+                        onClick={() => setSingleQuantity((q) => q + 1)}
+                        aria-label="Increase quantity"
+                        className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-800 hover:bg-slate-100"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
+
+            {/* Payment Method Selector */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-3.5 space-y-2">
+              <label className="block text-xs sm:text-sm font-bold text-slate-900">
+                Payment Method
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {(['Card', 'Bank Transfer', 'Mobile Money'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setPaymentMethod(m)}
+                    className={`min-h-[42px] rounded-xl border px-2 text-xs font-extrabold transition-colors ${
+                      paymentMethod === m
+                        ? 'border-green-700 bg-green-700 text-white'
+                        : 'border-slate-300 bg-slate-50 text-slate-800 hover:border-green-700'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Delivery Details + Same-City vs Standard Tier */}
             <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
@@ -569,7 +616,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <span>
                     {processing
                       ? 'Processing...'
-                      : `${t('pay_now')} — ${formatMoney(totalAmount, itemCountry)}`}
+                      : paymentMethod === 'Card'
+                      ? `${t('pay_now')} — ${formatMoney(totalAmount, itemCountry)}`
+                      : `Place Order (${paymentMethod}) — ${formatMoney(totalAmount, itemCountry)}`}
                   </span>
                 </button>
                 <div className="flex items-center justify-center gap-3 text-xs text-slate-500">

@@ -7,12 +7,14 @@ import {
   MapPin,
   Megaphone,
   MessageCircle,
+  Phone,
   Star,
   User,
   X,
 } from 'lucide-react';
+import { getCountryConfig, getCountryDisplayName } from '../data/languages';
 import { api, formatNaira, formatTimeAgo, isVerifiedOwnerUser } from '../lib/api';
-import type { AdSettings, PublicUser, ServiceProvider } from '../types';
+import type { AdSettings, PublicUser, ServiceBooking, ServiceProvider } from '../types';
 import { BadgeRow } from './BadgePill';
 import { PaystackFeeModal, PaystackFeeRequest } from './PaystackFeeModal';
 
@@ -50,6 +52,7 @@ export const ServiceProfileModal: React.FC<ServiceProfileModalProps> = ({
   const [reviewBusy, setReviewBusy] = useState(false);
   const [adBusy, setAdBusy] = useState(false);
   const [feeRequest, setFeeRequest] = useState<PaystackFeeRequest | null>(null);
+  const [bookedConfirmation, setBookedConfirmation] = useState<ServiceBooking | null>(null);
   const [errMsg, setErrMsg] = useState('');
 
   if (!service) return null;
@@ -70,7 +73,7 @@ export const ServiceProfileModal: React.FC<ServiceProfileModalProps> = ({
         name: service.title,
         price: service.price_from,
       };
-      await api.bookService({
+      const res = await api.bookService({
         service_id: service.id,
         service_name: offering.name,
         scheduled_day: scheduledDay,
@@ -79,6 +82,7 @@ export const ServiceProfileModal: React.FC<ServiceProfileModalProps> = ({
         price: offering.price,
         set_7_day_reminder: reminder7Days,
       });
+      setBookedConfirmation(res.booking);
       setShowBookForm(false);
       setNotes('');
       onNotice(
@@ -161,6 +165,35 @@ export const ServiceProfileModal: React.FC<ServiceProfileModalProps> = ({
             </div>
           )}
 
+          {bookedConfirmation && (
+            <div className="rounded-2xl border-2 border-green-700 bg-green-50 p-4 space-y-2 text-sm">
+              <div className="flex items-center gap-2 font-extrabold text-green-900">
+                <CheckCircle2 className="w-5 h-5 text-green-700 shrink-0" />
+                <span>Booking Confirmed: {bookedConfirmation.service_title}</span>
+              </div>
+              <p className="text-xs text-slate-700">
+                Scheduled for <strong>{bookedConfirmation.scheduled_day}</strong> at{' '}
+                <strong>{bookedConfirmation.location}</strong>.
+              </p>
+              {(bookedConfirmation.provider_phone || service.provider_phone) && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="inline-flex items-center gap-1.5 rounded-xl bg-white border border-green-300 px-3 py-1.5 text-xs font-extrabold text-green-950">
+                    <Phone className="w-4 h-4 text-green-700" />
+                    <span>
+                      Provider Phone: {bookedConfirmation.provider_phone || service.provider_phone}
+                    </span>
+                  </span>
+                  <a
+                    href={`tel:${bookedConfirmation.provider_phone || service.provider_phone}`}
+                    className="min-h-[34px] px-3 rounded-xl bg-green-700 text-white text-xs font-extrabold inline-flex items-center gap-1 hover:bg-green-800"
+                  >
+                    Call Provider
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Provider Summary */}
           <div className="flex items-start gap-4">
             <div className="w-16 h-16 rounded-2xl bg-green-100 border border-green-300 overflow-hidden flex items-center justify-center shrink-0">
@@ -191,7 +224,8 @@ export const ServiceProfileModal: React.FC<ServiceProfileModalProps> = ({
                 </span>
                 <span className="inline-flex items-center gap-1">
                   <MapPin className="w-3.5 h-3.5 text-green-700" />
-                  {service.location} ({service.distance_km} km away)
+                  {service.country ? `${getCountryConfig(service.country).flag} ${getCountryDisplayName(service.country)} · ` : ''}
+                  {service.state_city || service.location}
                 </span>
               </div>
             </div>
@@ -430,7 +464,13 @@ export const ServiceProfileModal: React.FC<ServiceProfileModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => setShowBookForm(true)}
+            onClick={() => {
+              if (!user) {
+                onRequireAuth();
+              } else {
+                setShowBookForm(true);
+              }
+            }}
             className="min-h-[50px] rounded-xl bg-green-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 hover:bg-green-800"
           >
             <CalendarCheck className="w-5 h-5" />

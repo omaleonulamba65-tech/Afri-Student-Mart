@@ -7,6 +7,7 @@ import type {
   EscrowOrder,
   ItemFilterMode,
   ItemOffer,
+  LiveVideo,
   MarketplaceItem,
   NotificationType,
   OwnerActiveSeller,
@@ -404,6 +405,61 @@ function containsProhibitedBankAccount(text: string): { matched: boolean; snippe
   return { matched: false, snippet: '' };
 }
 
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(',');
+  const mimeMatch = header.match(/data:([^;]+);/);
+  const mime = mimeMatch?.[1] || 'image/webp';
+  const bin = atob(base64 || '');
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+export async function uploadProductImage(fileOrDataUrl: File | Blob | string, folder = 'products'): Promise<string> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const uid = sessionData?.session?.user?.id || 'guest';
+
+  let dataUrl = '';
+  let uploadBlob: Blob;
+  let ext = 'webp';
+
+  if (typeof fileOrDataUrl === 'string') {
+    if (!fileOrDataUrl.startsWith('data:')) return fileOrDataUrl;
+    dataUrl = fileOrDataUrl;
+    uploadBlob = dataUrlToBlob(dataUrl);
+    if (uploadBlob.type.includes('jpeg') || uploadBlob.type.includes('jpg')) ext = 'jpg';
+    else if (uploadBlob.type.includes('png')) ext = 'png';
+  } else {
+    const fileObj = fileOrDataUrl instanceof File
+      ? fileOrDataUrl
+      : new File([fileOrDataUrl], `img_${Date.now()}.webp`, { type: fileOrDataUrl.type || 'image/webp' });
+    dataUrl = await compressImageFile(fileObj, 800, 200 * 1024);
+    uploadBlob = dataUrlToBlob(dataUrl);
+    if (uploadBlob.type.includes('jpeg') || uploadBlob.type.includes('jpg')) ext = 'jpg';
+    else if (uploadBlob.type.includes('png')) ext = 'png';
+  }
+
+  const filePath = `${folder}/${uid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  try {
+    const { error } = await supabase.storage
+      .from('product-images')
+      .upload(filePath, uploadBlob, {
+        contentType: uploadBlob.type || 'image/webp',
+        upsert: true,
+      });
+    if (!error) {
+      const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(filePath);
+      if (urlData?.publicUrl) return urlData.publicUrl;
+    }
+  } catch {
+    // Fallback below if storage bucket is not yet created
+  }
+  return dataUrl;
+}
+
 function mapDbRowToPublicUser(
   row: Record<string, unknown>,
   authUser?: { id: string; email?: string | null; user_metadata?: Record<string, unknown>; created_at?: string }
@@ -415,13 +471,24 @@ function mapDbRowToPublicUser(
   const role: PublicUser['role'] =
     rawRole === 'owner' ? 'owner' : rawRole === 'seller' ? 'seller' : 'buyer';
 
+  const rawUserType = String(row.user_type || meta.user_type || '');
   const accountType: AccountBadge =
     row.account_type === 'trader' ||
-    row.account_type === 'service_provider' ||
     meta.account_type === 'trader' ||
-    meta.account_type === 'service_provider'
-      ? ((row.account_type || meta.account_type) as AccountBadge)
+    rawUserType === 'Trader'
+      ? 'trader'
+      : row.account_type === 'service_provider' ||
+        meta.account_type === 'service_provider' ||
+        rawUserType === 'Service Provider'
+      ? 'service_provider'
       : 'student';
+
+  const userTypeLabel: PublicUser['user_type'] =
+    accountType === 'trader'
+      ? 'Trader'
+      : accountType === 'service_provider'
+      ? 'Service Provider'
+      : 'Student';
 
   const badgesFromRow = parseJsonArray(row.badges) as AccountBadge[];
   const badgesFromMeta = Array.isArray(meta.badges) ? (meta.badges as AccountBadge[]) : [];
@@ -442,20 +509,31 @@ function mapDbRowToPublicUser(
       : undefined;
 
   const payoutAccNum = String(row.payout_account_number || meta.payout_account_number || '');
+  const resolvedName = String(
+    row.name || row.full_name || meta.name || meta.full_name || authUser?.email?.split('@')[0] || 'Mart Member'
+  );
+  const resolvedPhone = String(row.phone || row.phone_number || meta.phone_number || '');
+  const resolvedLang = String(
+    row.language_of_preference || row.language || meta.language || cfg.languages[0] || 'English'
+  );
+  const resolvedState = String(row.state_city || row.state || meta.state || '');
 
   return {
     id: String(row.id || authUser?.id || ''),
-    full_name: String(
-      row.full_name || meta.full_name || authUser?.email?.split('@')[0] || 'Mart Member'
-    ),
+    name: resolvedName,
+    full_name: resolvedName,
     email:
       (typeof row.email === 'string' && row.email) ||
       authUser?.email ||
       (typeof meta.email === 'string' ? meta.email : undefined),
-    phone_number: String(row.phone_number || meta.phone_number || ''),
+    phone: resolvedPhone,
+    phone_number: resolvedPhone,
     country_code: String(row.country_code || meta.country_code || cfg.dialCode),
     country,
-    language: String(row.language || meta.language || cfg.languages[0] || 'English'),
+    state_city: resolvedState,
+    language_of_preference: resolvedLang,
+    language: resolvedLang,
+    user_type: userTypeLabel,
     role,
     badges,
     institution: String(row.institution || meta.institution || ''),
@@ -491,7 +569,7 @@ function mapDbRowToPublicUser(
         ? meta.price_from
         : undefined,
     work_photos: Array.isArray(meta.work_photos) ? (meta.work_photos as string[]) : undefined,
-    state: String(row.state || meta.state || ''),
+    state: resolvedState,
     campus: String(row.campus || meta.campus || ''),
     profile_pic: String(row.profile_pic || meta.profile_pic || ''),
     trust_score: Number(row.trust_score || 5.0),
@@ -516,23 +594,34 @@ async function fetchProfilesIndex(): Promise<{
   byId: Map<string, PublicUser>;
   byPhone: Map<string, PublicUser>;
   all: PublicUser[];
-  mode: 'profiles' | 'users';
+  mode: 'users' | 'profiles';
 }> {
   const byId = new Map<string, PublicUser>();
   const byPhone = new Map<string, PublicUser>();
   const all: PublicUser[] = [];
 
-  const profRes = await supabase.from('profiles').select('*');
-  let rows: Record<string, unknown>[] = [];
-  let mode: 'profiles' | 'users' = 'profiles';
+  const [usrRes, profRes] = await Promise.all([
+    supabase.from('users').select('*'),
+    supabase.from('profiles').select('*'),
+  ]);
 
+  const rows: Record<string, unknown>[] = [];
+  const seenIds = new Set<string>();
+  const mode: 'users' | 'profiles' = !usrRes.error ? 'users' : 'profiles';
+
+  if (!usrRes.error && Array.isArray(usrRes.data)) {
+    for (const r of usrRes.data as Record<string, unknown>[]) {
+      const id = String(r.id || '');
+      if (id) seenIds.add(id);
+      rows.push(r);
+    }
+  }
   if (!profRes.error && Array.isArray(profRes.data)) {
-    rows = profRes.data as Record<string, unknown>[];
-  } else if (isMissingTableError(profRes.error)) {
-    mode = 'users';
-    const usrRes = await supabase.from('users').select('*');
-    if (!usrRes.error && Array.isArray(usrRes.data)) {
-      rows = usrRes.data as Record<string, unknown>[];
+    for (const r of profRes.data as Record<string, unknown>[]) {
+      const id = String(r.id || '');
+      if (id && seenIds.has(id)) continue;
+      if (id) seenIds.add(id);
+      rows.push(r);
     }
   }
 
@@ -581,7 +670,7 @@ async function syncUserProfileRow(
   authUser: { id: string; email?: string | null; user_metadata?: Record<string, unknown>; created_at?: string }
 ): Promise<Record<string, unknown> | null> {
   const meta = (authUser.user_metadata || {}) as Record<string, unknown>;
-  const phone = String(meta.phone_number || '').trim();
+  const phone = String(meta.phone_number || meta.phone || '').trim();
   const ownerRow = await fetchOwnerRecordForUser({
     id: authUser.id,
     email: authUser.email,
@@ -597,47 +686,66 @@ async function syncUserProfileRow(
     return {
       ...base,
       role: 'owner',
-      full_name: String(ownerRow?.owner_name || base.full_name || meta.full_name || 'Mart Owner'),
+      name: String(ownerRow?.owner_name || base.name || base.full_name || meta.full_name || 'Mart Owner'),
+      full_name: String(ownerRow?.owner_name || base.full_name || base.name || meta.full_name || 'Mart Owner'),
       business_name: String(ownerRow?.business_name || base.business_name || meta.business_name || 'JOKIPEKI GROUP'),
-      phone_number: String(base.phone_number || ownerRow?.phone || phone || ''),
+      phone_number: String(base.phone_number || base.phone || ownerRow?.phone || phone || ''),
       email: String(base.email || ownerRow?.email || authUser.email || ''),
     };
   };
 
-  // 1) Try `profiles` table first (primary production table)
-  const existingProfile = await supabase
-    .from('profiles')
+  const roleVal = isOwnerMetaOrTable
+    ? 'owner'
+    : meta.account_type === 'trader' || meta.account_type === 'service_provider' || meta.role === 'seller'
+    ? 'seller'
+    : 'buyer';
+  const userType =
+    meta.account_type === 'trader'
+      ? 'Trader'
+      : meta.account_type === 'service_provider'
+      ? 'Service Provider'
+      : 'Student';
+  const fullNameVal = String(
+    ownerRow?.owner_name || meta.name || meta.full_name || authUser.email?.split('@')[0] || 'Mart Member'
+  );
+  const stateCityVal = String(meta.state_city || meta.state || '');
+  const langPrefVal = String(meta.language_of_preference || meta.language || 'English');
+  const safePhone = phone || (typeof ownerRow?.phone === 'string' ? ownerRow.phone : '') || '';
+
+  // 1) Primary table: `public.users`
+  const existingUser = await supabase
+    .from('users')
     .select('*')
     .eq('id', authUser.id)
     .maybeSingle();
 
-  if (!existingProfile.error && existingProfile.data) {
-    return applyOwnerOverlay(existingProfile.data as Record<string, unknown>);
+  if (!existingUser.error && existingUser.data) {
+    return applyOwnerOverlay(existingUser.data as Record<string, unknown>);
   }
 
-  if (!existingProfile.error) {
-    const roleVal = isOwnerMetaOrTable
-      ? 'owner'
-      : meta.account_type === 'trader' || meta.account_type === 'service_provider' || meta.role === 'seller'
-      ? 'seller'
-      : 'buyer';
-    const payload = {
+  if (!existingUser.error) {
+    const fullUsersPayload = {
       id: authUser.id,
-      full_name: String(ownerRow?.owner_name || meta.full_name || authUser.email?.split('@')[0] || 'Mart Member'),
+      name: fullNameVal,
+      full_name: fullNameVal,
       business_name:
         roleVal === 'owner'
           ? String(ownerRow?.business_name || meta.business_name || 'JOKIPEKI GROUP')
           : String(meta.shop_name || ''),
       email: authUser.email || (typeof meta.email === 'string' ? meta.email : null),
-      phone_number: phone || (typeof ownerRow?.phone === 'string' ? ownerRow.phone : null),
+      phone: safePhone,
+      phone_number: safePhone,
       country_code: String(meta.country_code || '+234'),
       country: String(meta.country || 'Nigeria'),
-      language: String(meta.language || 'English'),
-      role: roleVal,
+      state_city: stateCityVal,
+      state: stateCityVal,
+      language_of_preference: langPrefVal,
+      language: langPrefVal,
+      user_type: userType,
       account_type: String(meta.account_type || 'student'),
+      role: roleVal,
       badges: Array.isArray(meta.badges) ? meta.badges : [String(meta.account_type || 'student')],
       institution: String(meta.institution || ''),
-      state: String(meta.state || ''),
       campus: String(meta.campus || ''),
       level: String(meta.level || ''),
       shop_name: String(meta.shop_name || ''),
@@ -653,51 +761,42 @@ async function syncUserProfileRow(
       payout_account_number: String(meta.payout_account_number || ''),
       payout_account_name: String(meta.payout_account_name || ''),
       profile_pic: String(meta.profile_pic || ''),
+      password: '[supabase_auth]',
     };
-    const ins = await supabase.from('profiles').upsert(payload, { onConflict: 'id' }).select('*').maybeSingle();
+
+    let ins = await supabase.from('users').upsert(fullUsersPayload, { onConflict: 'id' }).select('*').maybeSingle();
+    if (ins.error && isMissingColumnError(ins.error)) {
+      const legacyUsersPayload = {
+        id: authUser.id,
+        full_name: fullNameVal,
+        email: authUser.email || null,
+        phone_number: safePhone || `auth_${authUser.id.slice(0, 12)}`,
+        password: '[supabase_auth]',
+        role: roleVal,
+        country: String(meta.country || 'Nigeria'),
+        institution: String(meta.institution || 'Main Campus'),
+        state: stateCityVal,
+        campus: String(meta.campus || 'Main Campus'),
+        profile_pic: String(meta.profile_pic || ''),
+      };
+      ins = await supabase.from('users').upsert(legacyUsersPayload, { onConflict: 'id' }).select('*').maybeSingle();
+    }
     if (!ins.error && ins.data) {
       return applyOwnerOverlay(ins.data as Record<string, unknown>);
     }
   }
 
-  // 2) Fallback to legacy `users` table if `profiles` table does not exist yet
+  // 2) Secondary sync to `profiles` if needed
   try {
-    const byId = await supabase.from('users').select('*').eq('id', authUser.id).maybeSingle();
-    if (!byId.error && byId.data) return applyOwnerOverlay(byId.data as Record<string, unknown>);
-
-    if (phone) {
-      const byPhone = await supabase.from('users').select('*').eq('phone_number', phone).maybeSingle();
-      if (!byPhone.error && byPhone.data) return applyOwnerOverlay(byPhone.data as Record<string, unknown>);
+    const existingProfile = await supabase.from('profiles').select('*').eq('id', authUser.id).maybeSingle();
+    if (!existingProfile.error && existingProfile.data) {
+      return applyOwnerOverlay(existingProfile.data as Record<string, unknown>);
     }
-
-    const derivedRole = isOwnerMetaOrTable
-      ? 'owner'
-      : meta.account_type === 'trader' || meta.account_type === 'service_provider' || meta.role === 'seller'
-      ? 'seller'
-      : 'buyer';
-    const safePhone = phone || (typeof ownerRow?.phone === 'string' ? ownerRow.phone : '') || `auth_${authUser.id.slice(0, 12)}`;
-    const insLegacy = await supabase
-      .from('users')
-      .insert({
-        id: authUser.id,
-        full_name: String(ownerRow?.owner_name || meta.full_name || authUser.email?.split('@')[0] || 'Mart Member'),
-        phone_number: safePhone,
-        password: '[supabase_auth]',
-        role: derivedRole,
-        institution: String(meta.institution || 'Main Campus'),
-        state: String(meta.state || ''),
-        campus: String(meta.campus || 'Main Campus'),
-        profile_pic: String(meta.profile_pic || ''),
-      })
-      .select('*')
-      .maybeSingle();
-    if (insLegacy.data) {
-      return applyOwnerOverlay(insLegacy.data as Record<string, unknown>);
-    }
-    return isOwnerMetaOrTable ? applyOwnerOverlay({ id: authUser.id }) : null;
   } catch {
-    return isOwnerMetaOrTable ? applyOwnerOverlay({ id: authUser.id }) : null;
+    // Ignore optional profiles table
   }
+
+  return applyOwnerOverlay({ id: authUser.id });
 }
 
 async function getAuthenticatedUser(): Promise<PublicUser> {
@@ -747,6 +846,7 @@ function saveReadSyntheticNotifIds(ids: Set<string>) {
 
 async function createNotificationRecord(payload: {
   user_id?: string | null;
+  user_email?: string | null;
   title: string;
   body: string;
   type: NotificationType;
@@ -754,15 +854,25 @@ async function createNotificationRecord(payload: {
   const targetId = (payload.user_id || '').trim();
   if (!targetId || !isUuid(targetId)) return;
   try {
-    await supabase.from('notifications').insert({
+    const res = await supabase.from('notifications').insert({
       user_id: targetId,
+      user_email: payload.user_email || '',
       title: payload.title,
       body: payload.body,
+      message: `${payload.title}: ${payload.body}`,
       type: payload.type,
       read: false,
+      is_read: false,
     });
+    if (res.error && isMissingColumnError(res.error)) {
+      await supabase.from('notifications').insert({
+        user_email: payload.user_email || targetId,
+        message: `${payload.title}: ${payload.body}`,
+        is_read: false,
+      });
+    }
   } catch {
-    // Optional if table not yet created in Supabase
+    // Optional if table differs
   }
 }
 
@@ -773,7 +883,9 @@ function mapSupabaseItemRow(
   ratingsBySeller?: Map<string, { sum: number; count: number }>,
   itemCountBySeller?: Map<string, number>
 ): MarketplaceItem {
-  const photos = parseJsonArray(row.photos);
+  const parsedPhotos = parseJsonArray(row.photos);
+  const singleImageUrl = typeof row.image_url === 'string' && row.image_url.trim() ? row.image_url.trim() : '';
+  const photos = parsedPhotos.length > 0 ? parsedPhotos : singleImageUrl ? [singleImageUrl] : [];
   const thumbs = parseJsonArray(row.thumbnails);
   const inst = String(row.institution || '');
   const loc = String(row.location || '');
@@ -802,17 +914,21 @@ function mapSupabaseItemRow(
       ? Number((ratingStats.sum / ratingStats.count).toFixed(1))
       : sellerProfile?.trust_score || 5.0;
   const reviewsCount = ratingStats?.count || sellerProfile?.reviews_count || 0;
+  const isAvailable = row.is_available === undefined ? true : Boolean(row.is_available);
 
   return {
     id: String(row.id || ''),
-    title: String(row.title || 'Marketplace Item'),
+    shop_id: typeof row.shop_id === 'string' && row.shop_id ? row.shop_id : undefined,
+    title: String(row.title || row.name || 'Marketplace Item'),
     category: String(row.category || 'Others'),
     price: Number(row.price || 0),
     condition: String(row.condition || 'Neatly Used') as MarketplaceItem['condition'],
     description: String(row.description || ''),
+    image_url: singleImageUrl || photos[0] || '',
     photos,
     thumbnails: thumbs.length > 0 ? thumbs : photos.slice(0, 1),
     video_url: typeof row.video_url === 'string' ? row.video_url : '',
+    is_available: isAvailable,
     make_offer: row.make_offer === undefined ? true : Boolean(row.make_offer),
     pay_on_delivery: row.pay_on_delivery === undefined ? true : Boolean(row.pay_on_delivery),
     is_boosted: Boolean(row.is_boosted),
@@ -840,7 +956,9 @@ function mapSupabaseItemRow(
     status:
       row.status === 'removed' || row.status === 'rejected' || row.status === 'pending'
         ? row.status
-        : 'active',
+        : isAvailable
+        ? 'active'
+        : 'removed',
     created_at: String(row.created_at || new Date().toISOString()),
   };
 }
@@ -848,16 +966,18 @@ function mapSupabaseItemRow(
 async function fetchSellerRatingsSummary(): Promise<Map<string, { sum: number; count: number }>> {
   const map = new Map<string, { sum: number; count: number }>();
   const { data, error } = await supabase
-    .from('ratings')
-    .select('target_id, score')
-    .eq('target_type', 'seller');
-  if (error || !Array.isArray(data)) return map;
-  for (const r of data as Array<{ target_id?: string; score?: number }>) {
-    if (!r.target_id) continue;
-    const prev = map.get(r.target_id) || { sum: 0, count: 0 };
-    prev.sum += Number(r.score || 0);
-    prev.count += 1;
-    map.set(r.target_id, prev);
+    .from('reviews')
+    .select('target_id, rating, stars');
+  if (!error && Array.isArray(data)) {
+    for (const r of data as Array<{ target_id?: string; rating?: number; stars?: number }>) {
+      if (!r.target_id) continue;
+      const val = Number(r.rating ?? r.stars ?? 0);
+      if (!val) continue;
+      const prev = map.get(r.target_id) || { sum: 0, count: 0 };
+      prev.sum += val;
+      prev.count += 1;
+      map.set(r.target_id, prev);
+    }
   }
   return map;
 }
@@ -1005,24 +1125,35 @@ export const api = {
     let resolvedEmail = identifier.includes('@') ? identifier.toLowerCase() : '';
     if (!resolvedEmail) {
       const candidates = phoneLookupCandidates(identifier);
-      const { data: profMatches } = await supabase
-        .from('profiles')
-        .select('email, phone_number, role')
-        .in('phone_number', candidates)
+      const { data: userMatches } = await supabase
+        .from('users')
+        .select('email, phone_number, phone, role')
+        .or(`phone_number.in.(${candidates.join(',')}),phone.in.(${candidates.join(',')})`)
         .limit(1);
 
-      const hit = Array.isArray(profMatches) ? (profMatches[0] as { email?: string } | undefined) : undefined;
-      if (hit?.email) {
-        resolvedEmail = hit.email.trim().toLowerCase();
+      const userHit = Array.isArray(userMatches) ? (userMatches[0] as { email?: string } | undefined) : undefined;
+      if (userHit?.email) {
+        resolvedEmail = userHit.email.trim().toLowerCase();
       } else {
-        const { data: ownerMatches } = await supabase
-          .from('owners')
-          .select('email, phone, role')
-          .in('phone', candidates)
+        const { data: profMatches } = await supabase
+          .from('profiles')
+          .select('email, phone_number, role')
+          .in('phone_number', candidates)
           .limit(1);
-        const ownerHit = Array.isArray(ownerMatches) ? (ownerMatches[0] as { email?: string } | undefined) : undefined;
-        if (ownerHit?.email) {
-          resolvedEmail = ownerHit.email.trim().toLowerCase();
+
+        const hit = Array.isArray(profMatches) ? (profMatches[0] as { email?: string } | undefined) : undefined;
+        if (hit?.email) {
+          resolvedEmail = hit.email.trim().toLowerCase();
+        } else {
+          const { data: ownerMatches } = await supabase
+            .from('owners')
+            .select('email, phone, role')
+            .in('phone', candidates)
+            .limit(1);
+          const ownerHit = Array.isArray(ownerMatches) ? (ownerMatches[0] as { email?: string } | undefined) : undefined;
+          if (ownerHit?.email) {
+            resolvedEmail = ownerHit.email.trim().toLowerCase();
+          }
         }
       }
     }
@@ -1126,12 +1257,25 @@ export const api = {
     }
 
     const profileUpdates: Record<string, unknown> = {};
-    if (payload.full_name !== undefined) profileUpdates.full_name = payload.full_name;
+    if (payload.full_name !== undefined) {
+      profileUpdates.full_name = payload.full_name;
+      profileUpdates.name = payload.full_name;
+    }
     if (payload.institution !== undefined) profileUpdates.institution = payload.institution;
-    if (payload.state !== undefined) profileUpdates.state = payload.state;
+    if (payload.state !== undefined) {
+      profileUpdates.state = payload.state;
+      profileUpdates.state_city = payload.state;
+    }
+    if (payload.state_city !== undefined) {
+      profileUpdates.state_city = payload.state_city;
+      profileUpdates.state = payload.state_city;
+    }
     if (payload.campus !== undefined) profileUpdates.campus = payload.campus;
     if (payload.country !== undefined) profileUpdates.country = payload.country;
-    if (payload.language !== undefined) profileUpdates.language = payload.language;
+    if (payload.language !== undefined) {
+      profileUpdates.language = payload.language;
+      profileUpdates.language_of_preference = payload.language;
+    }
     if (payload.profile_pic !== undefined) profileUpdates.profile_pic = payload.profile_pic;
     if (payload.badges !== undefined) profileUpdates.badges = payload.badges;
     if (payload.shop_name !== undefined) profileUpdates.shop_name = payload.shop_name;
@@ -1143,8 +1287,8 @@ export const api = {
     }
 
     if (Object.keys(profileUpdates).length > 0) {
-      const profUp = await supabase.from('profiles').update(profileUpdates).eq('id', data.user.id);
-      if (isMissingTableError(profUp.error)) {
+      const usrUp = await supabase.from('users').update(profileUpdates).eq('id', data.user.id);
+      if (usrUp.error && isMissingColumnError(usrUp.error)) {
         await supabase
           .from('users')
           .update({
@@ -1188,7 +1332,7 @@ export const api = {
     }
 
     await supabase
-      .from('profiles')
+      .from('users')
       .update({
         payout_bank_name: payload.bank_name,
         payout_account_number: cleanAcc,
@@ -1235,7 +1379,7 @@ export const api = {
     const limitNum = Math.max(1, params?.limit || 10);
 
     const [itemsRes, profilesIdx, ratingsMap] = await Promise.all([
-      supabase.from('items').select('*').order('created_at', { ascending: false }),
+      supabase.from('products').select('*').order('created_at', { ascending: false }),
       fetchProfilesIndex(),
       fetchSellerRatingsSummary(),
     ]);
@@ -1247,7 +1391,7 @@ export const api = {
     const rawRows = itemsRes.data as Array<Record<string, unknown>>;
     const countBySeller = new Map<string, number>();
     for (const r of rawRows) {
-      if (r.status === 'removed') continue;
+      if (r.status === 'removed' || r.is_available === false) continue;
       const sid = String(r.seller_id || r.seller_phone || '');
       if (sid) countBySeller.set(sid, (countBySeller.get(sid) || 0) + 1);
     }
@@ -1256,11 +1400,11 @@ export const api = {
       .map((r) =>
         mapSupabaseItemRow(r, profilesIdx.byId, profilesIdx.byPhone, ratingsMap, countBySeller)
       )
-      .filter((it) => it.status !== 'removed');
+      .filter((it) => it.status !== 'removed' && it.is_available !== false);
 
     if (params?.sellerId) {
       mapped = mapped.filter(
-        (it) => it.seller_id === params.sellerId || it.seller_id === params.sellerId
+        (it) => it.seller_id === params.sellerId
       );
     }
     if (params?.country && params.country !== 'All') {
@@ -1350,14 +1494,14 @@ export const api = {
 
   getItemDetail: async (id: string): Promise<MarketplaceItem> => {
     const [itemRes, profilesIdx, ratingsMap] = await Promise.all([
-      supabase.from('items').select('*').eq('id', id).maybeSingle(),
+      supabase.from('products').select('*').eq('id', id).maybeSingle(),
       fetchProfilesIndex(),
       fetchSellerRatingsSummary(),
     ]);
     if (itemRes.error || !itemRes.data) {
       const cached = itemDetailCache.get(id);
       if (cached) return cached;
-      throw new Error('Could not load item details.');
+      throw new Error('Could not load product details.');
     }
     const mapped = mapSupabaseItemRow(
       itemRes.data as Record<string, unknown>,
@@ -1369,7 +1513,12 @@ export const api = {
     return mapped;
   },
 
+  uploadProductImage: async (file: File | Blob | string): Promise<string> => {
+    return uploadProductImage(file, 'products');
+  },
+
   createItem: async (payload: {
+    shop_id?: string;
     title: string;
     category: string;
     price: number;
@@ -1377,7 +1526,7 @@ export const api = {
     description: string;
     photos: string[];
     thumbnails?: string[];
-    video_url: string;
+    video_url?: string;
     make_offer: boolean;
     pay_on_delivery: boolean;
     institution: string;
@@ -1396,56 +1545,66 @@ export const api = {
       throw new Error('Bank account numbers are not allowed in listings. All payments use Paystack Escrow.');
     }
 
+    const uploadedPhotos = await Promise.all(
+      (payload.photos || []).map((p) => (p.startsWith('data:') ? uploadProductImage(p, 'products') : Promise.resolve(p)))
+    );
+
     const fullInsert = {
+      shop_id: payload.shop_id || '',
       title: payload.title.trim(),
+      name: payload.title.trim(),
       category: payload.category,
       price: Number(payload.price),
       condition: payload.condition,
       description: payload.description.trim(),
-      photos: payload.photos,
-      thumbnails: payload.thumbnails || payload.photos.slice(0, 1),
+      image_url: uploadedPhotos[0] || '',
+      photos: uploadedPhotos,
+      thumbnails: payload.thumbnails || uploadedPhotos.slice(0, 1),
       video_url: payload.video_url || '',
       seller_id: me.id,
       seller_phone: me.phone_number || me.id,
       seller_name: me.full_name,
+      seller_email: me.email || '',
       institution: payload.institution || me.institution,
       location: payload.location || me.campus,
       state: me.state || '',
       country: payload.country || me.country || 'Nigeria',
       country_code: me.country_code || '+234',
+      is_available: true,
       make_offer: payload.make_offer,
       pay_on_delivery: payload.pay_on_delivery,
+      status: 'active',
     };
 
-    let res = await supabase.from('items').insert(fullInsert).select('*').single();
+    let res = await supabase.from('products').insert(fullInsert).select('*').single();
 
     if (res.error && isMissingColumnError(res.error)) {
       const legacyInsert = {
+        name: fullInsert.title,
         title: fullInsert.title,
         category: fullInsert.category,
         price: fullInsert.price,
-        condition: fullInsert.condition,
         description: fullInsert.description,
-        photos: fullInsert.photos,
-        seller_phone: fullInsert.seller_phone,
-        institution: fullInsert.institution,
-        location: fullInsert.location,
+        image_url: fullInsert.image_url,
+        seller_email: fullInsert.seller_email,
+        country: fullInsert.country,
+        is_available: true,
       };
-      res = await supabase.from('items').insert(legacyInsert).select('*').single();
+      res = await supabase.from('products').insert(legacyInsert).select('*').single();
     }
 
     if (res.error || !res.data) {
-      throw new Error(res.error?.message || 'Could not publish item.');
+      throw new Error(res.error?.message || 'Could not publish product.');
     }
 
     const mapped = mapSupabaseItemRow(res.data as Record<string, unknown>);
     mapped.seller_id = me.id;
     mapped.seller_name = me.full_name;
     mapped.seller_badges = me.badges;
-    mapped.video_url = payload.video_url;
-    mapped.thumbnails = payload.thumbnails || payload.photos.slice(0, 1);
+    mapped.video_url = payload.video_url || '';
+    if (uploadedPhotos.length > 0) mapped.photos = uploadedPhotos;
+    mapped.thumbnails = payload.thumbnails || uploadedPhotos.slice(0, 1);
 
-    // Notify any users with matching Price Drop ("I Want This") alerts
     try {
       const { data: alerts } = await supabase.from('want_alerts').select('*');
       if (Array.isArray(alerts)) {
@@ -1475,7 +1634,7 @@ export const api = {
   },
 
   boostItem: async (itemId: string, _paystackReference?: string) => {
-    const { error } = await supabase.from('items').update({ is_boosted: true }).eq('id', itemId);
+    const { error } = await supabase.from('products').update({ is_boosted: true }).eq('id', itemId);
     if (error && !isMissingColumnError(error)) {
       throw new Error(error.message);
     }
@@ -1483,7 +1642,7 @@ export const api = {
   },
 
   deleteItem: async (itemId: string) => {
-    const { error } = await supabase.from('items').delete().eq('id', itemId);
+    const { error } = await supabase.from('products').delete().eq('id', itemId);
     if (error) {
       throw new Error(error.message);
     }
@@ -1492,7 +1651,7 @@ export const api = {
 
   reportItem: async (itemId: string, reason: string) => {
     const me = await getAuthenticatedUser();
-    const { data: itemRow } = await supabase.from('items').select('*').eq('id', itemId).maybeSingle();
+    const { data: itemRow } = await supabase.from('products').select('*').eq('id', itemId).maybeSingle();
     const nextCount = Number((itemRow as Record<string, unknown> | null)?.report_count || 0) + 1;
     const autoRemoved = nextCount >= 3;
 
@@ -1506,10 +1665,10 @@ export const api = {
     });
 
     await supabase
-      .from('items')
+      .from('products')
       .update({
         report_count: nextCount,
-        ...(autoRemoved ? { status: 'removed' } : {}),
+        ...(autoRemoved ? { status: 'removed', is_available: false } : {}),
       })
       .eq('id', itemId)
       .then(() => {});
@@ -1529,17 +1688,17 @@ export const api = {
     });
 
     let autoSuspended = false;
-    const { data: targetProf } = await supabase
-      .from('profiles')
+    const { data: targetUsr } = await supabase
+      .from('users')
       .select('id, block_count')
       .eq('id', userId)
       .maybeSingle();
 
-    if (targetProf) {
-      const nextBlocks = Number((targetProf as { block_count?: number }).block_count || 0) + 1;
+    if (targetUsr) {
+      const nextBlocks = Number((targetUsr as { block_count?: number }).block_count || 0) + 1;
       autoSuspended = nextBlocks >= 3;
       await supabase
-        .from('profiles')
+        .from('users')
         .update({ block_count: nextBlocks, ...(autoSuspended ? { blocked: true } : {}) })
         .eq('id', userId);
     }
@@ -1584,14 +1743,14 @@ export const api = {
 
   createOffer: async (payload: { item_id: string; offered_price: number }): Promise<{ offer: ItemOffer }> => {
     const me = await getAuthenticatedUser();
-    const { data: itemRow } = await supabase.from('items').select('*').eq('id', payload.item_id).maybeSingle();
+    const { data: itemRow } = await supabase.from('products').select('*').eq('id', payload.item_id).maybeSingle();
     const row = (itemRow || {}) as Record<string, unknown>;
 
     const { data, error } = await supabase
       .from('offers')
       .insert({
         item_id: payload.item_id,
-        item_title: String(row.title || 'Marketplace Item'),
+        item_title: String(row.title || row.name || 'Marketplace Item'),
         item_price: Number(row.price || payload.offered_price),
         buyer_id: me.id,
         buyer_name: me.full_name,
@@ -1612,7 +1771,7 @@ export const api = {
     if (sellerUid && sellerUid !== me.id) {
       await createNotificationRecord({
         user_id: sellerUid,
-        title: `New Offer on ${String(row.title || 'your item')}`,
+        title: `New Offer on ${String(row.title || row.name || 'your item')}`,
         body: `${me.full_name} offered ${formatCountryMoney(Number(payload.offered_price), String(row.country || me.country || 'Nigeria'))}`,
         type: 'offer_received',
       });
@@ -1698,12 +1857,18 @@ export const api = {
     has_confirmed_order?: boolean;
   }> => {
     const me = await getAuthenticatedUser().catch(() => null);
-    const { data, error } = await supabase
-      .from('ratings')
+    let revQuery = supabase
+      .from('reviews')
       .select('*')
-      .eq('target_type', targetType)
-      .eq('target_id', targetId)
       .order('created_at', { ascending: false });
+
+    if (itemId) {
+      revQuery = revQuery.or(`product_id.eq.${itemId},target_id.eq.${targetId}`);
+    } else {
+      revQuery = revQuery.eq('target_id', targetId);
+    }
+
+    const { data, error } = await revQuery;
 
     const list: RatingRecord[] =
       !error && Array.isArray(data)
@@ -1711,9 +1876,9 @@ export const api = {
             id: String(r.id),
             target_type: (String(r.target_type || targetType) as RatingRecord['target_type']),
             target_id: String(r.target_id || targetId),
-            item_id: typeof r.item_id === 'string' ? r.item_id : undefined,
-            rater_name: String(r.rater_name || 'Buyer'),
-            score: Number(r.score || 5),
+            item_id: typeof r.product_id === 'string' && r.product_id ? r.product_id : typeof r.item_id === 'string' ? r.item_id : itemId,
+            rater_name: String(r.reviewer_name || r.rater_name || 'Buyer'),
+            score: Number(r.rating ?? r.stars ?? r.score ?? 5),
             comment: String(r.comment || ''),
             video_url: typeof r.video_url === 'string' ? r.video_url : undefined,
             created_at: String(r.created_at || new Date().toISOString()),
@@ -1728,12 +1893,15 @@ export const api = {
     if (me && itemId) {
       const { data: ordData } = await supabase
         .from('orders')
-        .select('id, order_status')
-        .eq('buyer_id', me.id)
-        .eq('item_id', itemId)
-        .eq('order_status', 'delivered_confirmed')
-        .limit(1);
-      hasConfirmedOrder = Array.isArray(ordData) && ordData.length > 0;
+        .select('id, status, order_status, item_id, product_id')
+        .eq('buyer_id', me.id);
+      if (Array.isArray(ordData)) {
+        hasConfirmedOrder = (ordData as Array<Record<string, unknown>>).some(
+          (o) =>
+            (String(o.product_id || '') === itemId || String(o.item_id || '') === itemId) &&
+            (o.status === 'delivered' || o.order_status === 'delivered_confirmed')
+        );
+      }
     }
 
     return {
@@ -1756,36 +1924,52 @@ export const api = {
     if (payload.item_id) {
       const { data: ordData } = await supabase
         .from('orders')
-        .select('id')
-        .eq('buyer_id', me.id)
-        .eq('item_id', payload.item_id)
-        .eq('order_status', 'delivered_confirmed')
-        .limit(1);
-      if (!Array.isArray(ordData) || ordData.length === 0) {
-        throw new Error('Only buyers with a confirmed completed order can submit a review.');
+        .select('id, status, order_status, item_id, product_id')
+        .eq('buyer_id', me.id);
+      const deliveredMatch = Array.isArray(ordData)
+        ? (ordData as Array<Record<string, unknown>>).some(
+            (o) =>
+              (String(o.product_id || '') === payload.item_id || String(o.item_id || '') === payload.item_id) &&
+              (o.status === 'delivered' || o.order_status === 'delivered_confirmed')
+          )
+        : false;
+      if (!deliveredMatch) {
+        throw new Error('Only buyers with a delivered order can submit a review.');
       }
     }
 
-    const { data, error } = await supabase
-      .from('ratings')
-      .insert({
-        target_type: payload.target_type,
-        target_id: payload.target_id,
-        item_id: payload.item_id || '',
-        rater_id: me.id,
-        rater_phone: me.phone_number || '',
-        rater_name: me.full_name,
-        score: payload.score,
-        comment: payload.comment.trim(),
-        video_url: payload.video_url || '',
-      })
-      .select('*')
-      .single();
+    const reviewInsert = {
+      reviewer_id: me.id,
+      reviewer_name: me.full_name,
+      rater_phone: me.phone_number || '',
+      product_id: payload.item_id || payload.target_id,
+      target_type: payload.target_type,
+      target_id: payload.target_id,
+      rating: payload.score,
+      stars: payload.score,
+      comment: payload.comment.trim(),
+      video_url: payload.video_url || '',
+    };
 
-    if (error || !data) {
-      throw new Error(error?.message || 'Could not save rating.');
+    let res = await supabase.from('reviews').insert(reviewInsert).select('*').single();
+    if (res.error && isMissingColumnError(res.error)) {
+      res = await supabase
+        .from('reviews')
+        .insert({
+          product_id: payload.item_id || payload.target_id,
+          reviewer_id: me.id,
+          rating: payload.score,
+          stars: payload.score,
+          comment: payload.comment.trim(),
+        })
+        .select('*')
+        .single();
     }
-    const r = data as Record<string, unknown>;
+
+    if (res.error || !res.data) {
+      throw new Error(res.error?.message || 'Could not save review.');
+    }
+    const r = res.data as Record<string, unknown>;
     return {
       rating: {
         id: String(r.id),
@@ -1793,7 +1977,7 @@ export const api = {
         target_id: payload.target_id,
         item_id: payload.item_id,
         rater_name: me.full_name,
-        score: Number(r.score || payload.score),
+        score: Number(r.rating ?? r.stars ?? payload.score),
         comment: String(r.comment || ''),
         video_url: typeof r.video_url === 'string' ? r.video_url : undefined,
         created_at: String(r.created_at || new Date().toISOString()),
@@ -1827,7 +2011,7 @@ export const api = {
         .select('*')
         .eq('user_id', me.id)
         .order('created_at', { ascending: false }),
-      supabase.from('items').select('id, title, price, institution, seller_phone, created_at'),
+      supabase.from('products').select('id, title, name, price, institution, seller_phone, created_at'),
     ]);
 
     if (alertsRes.error || !Array.isArray(alertsRes.data)) return { alerts: [] };
@@ -1841,11 +2025,11 @@ export const api = {
       const matches = allItems
         .filter(
           (it) =>
-            String(it.title || '').toLowerCase().includes(kw) && Number(it.price || 0) <= maxP
+            String(it.title || it.name || '').toLowerCase().includes(kw) && Number(it.price || 0) <= maxP
         )
         .map((it) => ({
           item_id: String(it.id),
-          item_title: String(it.title),
+          item_title: String(it.title || it.name || 'Item'),
           item_price: Number(it.price || 0),
           seller_name: 'Seller',
           institution: String(it.institution || ''),
@@ -1887,18 +2071,18 @@ export const api = {
       throw new Error(error?.message || 'Could not save alert.');
     }
 
-    const { data: items } = await supabase.from('items').select('*');
+    const { data: items } = await supabase.from('products').select('*');
     const kw = payload.keyword.trim().toLowerCase();
     const matches = Array.isArray(items)
       ? (items as Array<Record<string, unknown>>)
           .filter(
             (it) =>
-              String(it.title || '').toLowerCase().includes(kw) &&
+              String(it.title || it.name || '').toLowerCase().includes(kw) &&
               Number(it.price || 0) <= Number(payload.max_price)
           )
           .map((it) => ({
             item_id: String(it.id),
-            item_title: String(it.title),
+            item_title: String(it.title || it.name || 'Item'),
             item_price: Number(it.price || 0),
             seller_name: String(it.seller_name || 'Seller'),
             institution: String(it.institution || ''),
@@ -1963,37 +2147,53 @@ export const api = {
     return api.getWishlist();
   },
 
-  getServices: async (params?: { search?: string; category?: string }): Promise<{ services: ServiceProvider[] }> => {
-    const { data, error } = await supabase
-      .from('services')
-      .select('*')
-      .order('is_advertised', { ascending: false })
-      .order('created_at', { ascending: false });
+  getServices: async (params?: { search?: string; category?: string; country?: string }): Promise<{ services: ServiceProvider[] }> => {
+    const [{ data, error }, profilesIdx] = await Promise.all([
+      supabase
+        .from('services')
+        .select('*')
+        .order('is_advertised', { ascending: false })
+        .order('created_at', { ascending: false }),
+      fetchProfilesIndex(),
+    ]);
 
     if (error || !Array.isArray(data)) return { services: [] };
-    let mapped: ServiceProvider[] = (data as Array<Record<string, unknown>>).map((s) => ({
-      id: String(s.id),
-      provider_id: String(s.provider_id || ''),
-      provider_name: String(s.provider_name || 'Campus Provider'),
-      profile_pic: String(s.profile_pic || ''),
-      category: String(s.category || 'Services'),
-      title: String(s.title || ''),
-      description: String(s.description || ''),
-      price_from: Number(s.price_from || 0),
-      location: String(s.location || ''),
-      distance_km: 1,
-      rating: Number(s.rating || 5.0),
-      reviews_count: Number(s.reviews_count || 0),
-      work_photos: parseJsonArray(s.work_photos),
-      offerings: Array.isArray(s.offerings)
-        ? (s.offerings as ServiceProvider['offerings'])
-        : [],
-      reviews: Array.isArray(s.reviews) ? (s.reviews as ServiceProvider['reviews']) : [],
-      badges: ['service_provider'],
-      is_advertised: Boolean(s.is_advertised),
-      created_at: String(s.created_at || new Date().toISOString()),
-    }));
+    let mapped: ServiceProvider[] = (data as Array<Record<string, unknown>>).map((s) => {
+      const pid = String(s.provider_id || '');
+      const prof = pid ? profilesIdx.byId.get(pid) : undefined;
+      const inferredCountry = String(s.country || prof?.country || 'Nigeria');
+      const stateCity = String(s.state_city || s.location || prof?.state_city || prof?.campus || '');
+      return {
+        id: String(s.id),
+        provider_id: pid,
+        provider_name: String(s.provider_name || prof?.full_name || 'Campus Provider'),
+        provider_phone: String(s.provider_phone || prof?.phone_number || ''),
+        profile_pic: String(s.profile_pic || prof?.profile_pic || ''),
+        category: String(s.category || 'Services'),
+        title: String(s.title || ''),
+        description: String(s.description || ''),
+        price_from: Number(s.price ?? s.price_from ?? 0),
+        country: inferredCountry,
+        state_city: stateCity,
+        location: stateCity,
+        distance_km: 1,
+        rating: Number(s.rating || 5.0),
+        reviews_count: Number(s.reviews_count || 0),
+        work_photos: parseJsonArray(s.work_photos),
+        offerings: Array.isArray(s.offerings)
+          ? (s.offerings as ServiceProvider['offerings'])
+          : [],
+        reviews: Array.isArray(s.reviews) ? (s.reviews as ServiceProvider['reviews']) : [],
+        badges: ['service_provider'],
+        is_advertised: Boolean(s.is_advertised),
+        created_at: String(s.created_at || new Date().toISOString()),
+      };
+    });
 
+    if (params?.country && params.country !== 'All') {
+      const tc = params.country.trim().toLowerCase();
+      mapped = mapped.filter((s) => (s.country || 'Nigeria').toLowerCase() === tc);
+    }
     if (params?.category && params.category !== 'All') {
       mapped = mapped.filter((s) => s.category === params.category);
     }
@@ -2002,6 +2202,7 @@ export const api = {
       mapped = mapped.filter(
         (s) =>
           s.title.toLowerCase().includes(q) ||
+          s.category.toLowerCase().includes(q) ||
           s.provider_name.toLowerCase().includes(q) ||
           s.location.toLowerCase().includes(q)
       );
@@ -2014,11 +2215,15 @@ export const api = {
     category: string;
     description: string;
     price_from: number;
+    country?: string;
+    state_city?: string;
     location: string;
     work_photos: string[];
     offerings: Array<{ name: string; price: number; duration: string }>;
   }): Promise<{ service: ServiceProvider }> => {
     const me = await getAuthenticatedUser();
+    const countryVal = payload.country || me.country || 'Nigeria';
+    const stateCityVal = payload.state_city || payload.location || me.state_city || me.campus || '';
     const { data, error } = await supabase
       .from('services')
       .insert({
@@ -2029,8 +2234,11 @@ export const api = {
         category: payload.category,
         title: payload.title.trim(),
         description: payload.description.trim(),
+        price: Number(payload.price_from || 0),
         price_from: Number(payload.price_from || 0),
-        location: payload.location || me.campus,
+        country: countryVal,
+        state_city: stateCityVal,
+        location: stateCityVal,
         work_photos: payload.work_photos,
         offerings: payload.offerings,
         reviews: [],
@@ -2049,12 +2257,15 @@ export const api = {
         id: String(s.id),
         provider_id: me.id,
         provider_name: me.full_name,
+        provider_phone: me.phone_number || '',
         profile_pic: me.profile_pic || '',
         category: payload.category,
         title: payload.title.trim(),
         description: payload.description.trim(),
         price_from: Number(payload.price_from || 0),
-        location: payload.location || me.campus,
+        country: countryVal,
+        state_city: stateCityVal,
+        location: stateCityVal,
         distance_km: 1,
         rating: 5.0,
         reviews_count: 0,
@@ -2120,11 +2331,14 @@ export const api = {
         id: String(row.id),
         provider_id: String(row.provider_id || ''),
         provider_name: String(row.provider_name || 'Provider'),
+        provider_phone: String(row.provider_phone || ''),
         profile_pic: String(row.profile_pic || ''),
         category: String(row.category || ''),
         title: String(row.title || ''),
         description: String(row.description || ''),
-        price_from: Number(row.price_from || 0),
+        price_from: Number(row.price ?? row.price_from ?? 0),
+        country: String(row.country || 'Nigeria'),
+        state_city: String(row.state_city || row.location || ''),
         location: String(row.location || ''),
         distance_km: 1,
         rating: nextAvg,
@@ -2153,7 +2367,7 @@ export const api = {
     const me = await getAuthenticatedUser();
     const { data: svc } = await supabase
       .from('services')
-      .select('provider_id, provider_name, provider_phone')
+      .select('provider_id, provider_name, provider_phone, country')
       .eq('id', payload.service_id)
       .maybeSingle();
 
@@ -2161,12 +2375,13 @@ export const api = {
       ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
       : null;
 
+    const svcRow = svc as { provider_id?: string; provider_name?: string; provider_phone?: string; country?: string } | null;
     const { data, error } = await supabase
       .from('bookings')
       .insert({
         service_id: payload.service_id,
-        provider_id: (svc as { provider_id?: string } | null)?.provider_id || null,
-        provider_phone: (svc as { provider_phone?: string } | null)?.provider_phone || '',
+        provider_id: svcRow?.provider_id || null,
+        provider_phone: svcRow?.provider_phone || '',
         customer_id: me.id,
         customer_phone: me.phone_number || '',
         customer_name: me.full_name,
@@ -2182,7 +2397,36 @@ export const api = {
       .single();
 
     if (error || !data) throw new Error(error?.message || 'Booking failed.');
-    const providerUid = (svc as { provider_id?: string } | null)?.provider_id || '';
+
+    // Also record a corresponding service order in public.orders
+    await supabase
+      .from('orders')
+      .insert({
+        reference: `SVC_${Date.now()}_${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+        product_id: payload.service_id,
+        item_id: payload.service_id,
+        item_title: `Service: ${payload.service_name}`,
+        item_location: payload.location,
+        buyer_id: me.id,
+        buyer_name: me.full_name,
+        buyer_phone: me.phone_number || '',
+        buyer_email: me.email || '',
+        seller_id: isUuid(svcRow?.provider_id) ? svcRow?.provider_id : null,
+        seller_name: svcRow?.provider_name || 'Service Provider',
+        seller_phone: svcRow?.provider_phone || '',
+        quantity: 1,
+        product_price: Number(payload.price || 0),
+        total_price: Number(payload.price || 0),
+        total_amount: Number(payload.price || 0),
+        total: Number(payload.price || 0),
+        delivery_address: payload.location,
+        country: svcRow?.country || me.country || 'Nigeria',
+        status: 'pending',
+        order_status: 'paid_escrow',
+      })
+      .then(() => {});
+
+    const providerUid = svcRow?.provider_id || '';
     if (providerUid && providerUid !== me.id) {
       await createNotificationRecord({
         user_id: providerUid,
@@ -2197,7 +2441,8 @@ export const api = {
         id: String(b.id),
         service_id: payload.service_id,
         service_title: payload.service_name,
-        provider_name: String((svc as { provider_name?: string } | null)?.provider_name || 'Provider'),
+        provider_name: String(svcRow?.provider_name || 'Provider'),
+        provider_phone: String(svcRow?.provider_phone || ''),
         scheduled_day: payload.scheduled_day,
         location: payload.location,
         notes: payload.notes || '',
@@ -2225,6 +2470,7 @@ export const api = {
         service_id: String(b.service_id || ''),
         service_title: String(b.service_name || 'Service Booking'),
         provider_name: String(b.customer_name || 'Provider'),
+        provider_phone: String(b.provider_phone || ''),
         scheduled_day: String(b.scheduled_day || ''),
         location: String(b.location || ''),
         notes: String(b.notes || ''),
@@ -2236,33 +2482,38 @@ export const api = {
     return { bookings };
   },
 
-  getShops: async (): Promise<{ shops: TraderShop[] }> => {
+  getShops: async (params?: { country?: string }): Promise<{ shops: TraderShop[] }> => {
     const [shopsRes, itemsRes] = await Promise.all([
       supabase
         .from('shops')
         .select('*')
         .order('is_featured', { ascending: false })
         .order('created_at', { ascending: false }),
-      api.getItems({ limit: 200 }),
+      api.getItems({ limit: 300 }),
     ]);
 
     if (shopsRes.error || !Array.isArray(shopsRes.data)) return { shops: [] };
     const allItems = itemsRes.items;
 
-    const shops: TraderShop[] = (shopsRes.data as Array<Record<string, unknown>>).map((s) => {
+    let shops: TraderShop[] = (shopsRes.data as Array<Record<string, unknown>>).map((s) => {
+      const shopId = String(s.id);
       const ownerId = String(s.owner_id || '');
       const ownerPhone = String(s.owner_phone || '');
       const shopProducts = allItems.filter(
         (it) =>
+          it.shop_id === shopId ||
           (ownerId && it.seller_id === ownerId) ||
           (ownerPhone && it.seller_id === ownerPhone)
       );
       return {
-        id: String(s.id),
+        id: shopId,
         owner_id: ownerId,
         owner_name: String(s.owner_name || 'Trader'),
         shop_name: String(s.shop_name || 'Campus Shop'),
-        market: String(s.market || ''),
+        description: String(s.description || ''),
+        country: String(s.country || 'Nigeria'),
+        state_city: String(s.state_city || s.market || ''),
+        market: String(s.market || s.state_city || ''),
         shop_photo: String(s.shop_photo || ''),
         whatsapp_phone: ownerPhone || undefined,
         rating: Number(s.rating || 5.0),
@@ -2272,11 +2523,53 @@ export const api = {
         products: shopProducts,
       };
     });
+
+    if (params?.country && params.country !== 'All') {
+      const tc = params.country.trim().toLowerCase();
+      shops = shops.filter((sh) => (sh.country || 'Nigeria').toLowerCase() === tc);
+    }
+
     return { shops };
+  },
+
+  getMyShop: async (): Promise<{ shop: TraderShop | null }> => {
+    const me = await getAuthenticatedUser().catch(() => null);
+    if (!me) return { shop: null };
+    const { data, error } = await supabase
+      .from('shops')
+      .select('*')
+      .eq('owner_id', me.id)
+      .maybeSingle();
+    if (error || !data) return { shop: null };
+    const s = data as Record<string, unknown>;
+    const shopId = String(s.id);
+    const { items } = await api.getItems({ sellerId: me.id, limit: 100 });
+    return {
+      shop: {
+        id: shopId,
+        owner_id: me.id,
+        owner_name: String(s.owner_name || me.full_name),
+        shop_name: String(s.shop_name || 'My Shop'),
+        description: String(s.description || ''),
+        country: String(s.country || me.country || 'Nigeria'),
+        state_city: String(s.state_city || s.market || me.state_city || ''),
+        market: String(s.market || s.state_city || ''),
+        shop_photo: String(s.shop_photo || ''),
+        whatsapp_phone: String(s.owner_phone || me.phone_number || ''),
+        rating: Number(s.rating || 5.0),
+        sales_count: Number(s.sales_count || 0),
+        is_featured: Boolean(s.is_featured),
+        products_count: items.length,
+        products: items,
+      },
+    };
   },
 
   updateMyShop: async (payload: {
     shop_name: string;
+    description?: string;
+    country?: string;
+    state_city?: string;
     market: string;
     shop_photo?: string;
   }): Promise<{ shop: TraderShop }> => {
@@ -2287,13 +2580,21 @@ export const api = {
       .eq('owner_id', me.id)
       .maybeSingle();
 
+    const uploadedShopPhoto =
+      payload.shop_photo && payload.shop_photo.startsWith('data:')
+        ? await uploadProductImage(payload.shop_photo, 'shops')
+        : payload.shop_photo;
+
     const shopPayload = {
       owner_id: me.id,
       owner_name: me.full_name,
       owner_phone: me.phone_number || `shop_${me.id.slice(0, 8)}`,
       shop_name: payload.shop_name.trim(),
-      market: payload.market.trim(),
-      ...(payload.shop_photo ? { shop_photo: payload.shop_photo } : {}),
+      description: (payload.description || '').trim(),
+      country: payload.country || me.country || 'Nigeria',
+      state_city: (payload.state_city || payload.market || me.state_city || '').trim(),
+      market: payload.market.trim() || (payload.state_city || '').trim(),
+      ...(uploadedShopPhoto ? { shop_photo: uploadedShopPhoto } : {}),
     };
 
     const res = existing
@@ -2314,7 +2615,10 @@ export const api = {
         owner_id: me.id,
         owner_name: me.full_name,
         shop_name: String(s.shop_name),
-        market: String(s.market),
+        description: String(s.description || ''),
+        country: String(s.country || me.country || 'Nigeria'),
+        state_city: String(s.state_city || s.market || ''),
+        market: String(s.market || ''),
         shop_photo: String(s.shop_photo || ''),
         whatsapp_phone: me.phone_number,
         rating: Number(s.rating || 5.0),
@@ -2324,6 +2628,18 @@ export const api = {
         products: [],
       },
     };
+  },
+
+  deleteMyShop: async (shopId: string): Promise<{ ok: boolean }> => {
+    const me = await getAuthenticatedUser();
+    const { error } = await supabase
+      .from('shops')
+      .delete()
+      .eq('id', shopId)
+      .eq('owner_id', me.id);
+    if (error) throw new Error(error.message);
+    await api.updateProfile({ shop_name: '' }).catch(() => {});
+    return { ok: true };
   },
 
   featureMyShop: async (_paystackReference?: string) => {
@@ -2336,6 +2652,131 @@ export const api = {
     return { ok: true, is_featured: true };
   },
 
+  getLiveVideos: async (params?: { country?: string }): Promise<{ videos: LiveVideo[] }> => {
+    const { data, error } = await supabase
+      .from('live_videos')
+      .select('*')
+      .eq('is_live', true)
+      .order('created_at', { ascending: false });
+
+    if (error || !Array.isArray(data)) return { videos: [] };
+    let videos: LiveVideo[] = (data as Array<Record<string, unknown>>).map((v) => ({
+      id: String(v.id),
+      seller_id: String(v.seller_id || ''),
+      seller_name: String(v.seller_name || 'Seller'),
+      seller_phone: typeof v.seller_phone === 'string' ? v.seller_phone : undefined,
+      shop_id: typeof v.shop_id === 'string' ? v.shop_id : undefined,
+      shop_name: typeof v.shop_name === 'string' ? v.shop_name : undefined,
+      title: String(v.title || 'Live Product Showcase'),
+      description: typeof v.description === 'string' ? v.description : '',
+      video_url: String(v.video_url || ''),
+      thumbnail_url: typeof v.thumbnail_url === 'string' ? v.thumbnail_url : undefined,
+      country: String(v.country || 'Nigeria'),
+      is_live: Boolean(v.is_live),
+      viewers_count: Number(v.viewers_count || 0),
+      created_at: String(v.created_at || new Date().toISOString()),
+      ended_at: typeof v.ended_at === 'string' ? v.ended_at : undefined,
+    }));
+
+    if (params?.country && params.country !== 'All') {
+      const tc = params.country.trim().toLowerCase();
+      videos = videos.filter((v) => v.country.toLowerCase() === tc);
+    }
+    return { videos };
+  },
+
+  getMyLiveVideos: async (): Promise<{ videos: LiveVideo[] }> => {
+    const me = await getAuthenticatedUser().catch(() => null);
+    if (!me) return { videos: [] };
+    const { data, error } = await supabase
+      .from('live_videos')
+      .select('*')
+      .eq('seller_id', me.id)
+      .order('created_at', { ascending: false });
+    if (error || !Array.isArray(data)) return { videos: [] };
+    return {
+      videos: (data as Array<Record<string, unknown>>).map((v) => ({
+        id: String(v.id),
+        seller_id: String(v.seller_id || me.id),
+        seller_name: String(v.seller_name || me.full_name),
+        seller_phone: typeof v.seller_phone === 'string' ? v.seller_phone : me.phone_number,
+        shop_id: typeof v.shop_id === 'string' ? v.shop_id : undefined,
+        shop_name: typeof v.shop_name === 'string' ? v.shop_name : undefined,
+        title: String(v.title || 'Live Product Showcase'),
+        description: typeof v.description === 'string' ? v.description : '',
+        video_url: String(v.video_url || ''),
+        thumbnail_url: typeof v.thumbnail_url === 'string' ? v.thumbnail_url : undefined,
+        country: String(v.country || me.country || 'Nigeria'),
+        is_live: Boolean(v.is_live),
+        viewers_count: Number(v.viewers_count || 0),
+        created_at: String(v.created_at || new Date().toISOString()),
+        ended_at: typeof v.ended_at === 'string' ? v.ended_at : undefined,
+      })),
+    };
+  },
+
+  startLiveVideo: async (payload: {
+    shop_id?: string;
+    shop_name?: string;
+    title: string;
+    description?: string;
+    video_url: string;
+    thumbnail_url?: string;
+    country?: string;
+  }): Promise<{ video: LiveVideo }> => {
+    const me = await getAuthenticatedUser();
+    const { data, error } = await supabase
+      .from('live_videos')
+      .insert({
+        seller_id: me.id,
+        seller_name: me.full_name,
+        seller_phone: me.phone_number || '',
+        shop_id: payload.shop_id || '',
+        shop_name: payload.shop_name || me.shop_name || '',
+        title: payload.title.trim(),
+        description: (payload.description || '').trim(),
+        video_url: payload.video_url.trim(),
+        thumbnail_url: payload.thumbnail_url || '',
+        country: payload.country || me.country || 'Nigeria',
+        is_live: true,
+        viewers_count: 1,
+      })
+      .select('*')
+      .single();
+
+    if (error || !data) throw new Error(error?.message || 'Could not start Live Video.');
+    const v = data as Record<string, unknown>;
+    return {
+      video: {
+        id: String(v.id),
+        seller_id: me.id,
+        seller_name: me.full_name,
+        seller_phone: me.phone_number,
+        shop_id: String(v.shop_id || ''),
+        shop_name: String(v.shop_name || ''),
+        title: String(v.title || payload.title),
+        description: String(v.description || ''),
+        video_url: String(v.video_url || payload.video_url),
+        thumbnail_url: String(v.thumbnail_url || ''),
+        country: String(v.country || me.country || 'Nigeria'),
+        is_live: true,
+        viewers_count: Number(v.viewers_count || 1),
+        created_at: String(v.created_at || new Date().toISOString()),
+      },
+    };
+  },
+
+  endLiveVideo: async (liveId: string): Promise<{ ok: boolean }> => {
+    const me = await getAuthenticatedUser();
+    const { error } = await supabase
+      .from('live_videos')
+      .update({ is_live: false, ended_at: new Date().toISOString() })
+      .eq('id', liveId)
+      .eq('seller_id', me.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  },
+
   getThreads: async (): Promise<{ threads: ChatThread[] }> => {
     const me = await getAuthenticatedUser().catch(() => null);
     if (!me) return { threads: [] };
@@ -2343,7 +2784,7 @@ export const api = {
     const [msgsRes, profilesIdx, itemsRes] = await Promise.all([
       supabase.from('messages').select('*').order('created_at', { ascending: false }).limit(500),
       fetchProfilesIndex(),
-      supabase.from('items').select('*'),
+      supabase.from('products').select('*'),
     ]);
 
     if (msgsRes.error || !Array.isArray(msgsRes.data)) return { threads: [] };
@@ -2424,7 +2865,7 @@ export const api = {
 
     let resolvedItem: MarketplaceItem | null = null;
     if (isUuid(itemId)) {
-      const { data: itemRow } = await supabase.from('items').select('*').eq('id', itemId).maybeSingle();
+      const { data: itemRow } = await supabase.from('products').select('*').eq('id', itemId).maybeSingle();
       if (itemRow) {
         resolvedItem = mapSupabaseItemRow(
           itemRow as Record<string, unknown>,
@@ -2578,7 +3019,7 @@ export const api = {
       sellerPhone = srow?.provider_phone || '';
     } else if (isUuid(payload.item_id)) {
       const { data: itemRow } = await supabase
-        .from('items')
+        .from('products')
         .select('seller_id, seller_phone')
         .eq('id', payload.item_id)
         .maybeSingle();
@@ -2708,7 +3149,7 @@ export const api = {
 
     const [profilesIdx, itemsRes, ordersRes, reportsRes, msgsRes, adRes] = await Promise.all([
       fetchProfilesIndex(),
-      supabase.from('items').select('*').order('created_at', { ascending: false }),
+      supabase.from('products').select('*').order('created_at', { ascending: false }),
       supabase.from('orders').select('*').order('created_at', { ascending: false }),
       supabase.from('reports').select('*').order('created_at', { ascending: false }),
       supabase.from('messages').select('*').order('created_at', { ascending: true }).limit(1500),
@@ -3130,7 +3571,7 @@ export const api = {
   ownerFeatureItem: async (itemId: string, featured: boolean) => {
     const me = await getAuthenticatedUser();
     if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
-    const { error } = await supabase.from('items').update({ is_featured: featured }).eq('id', itemId);
+    const { error } = await supabase.from('products').update({ is_featured: featured }).eq('id', itemId);
     if (error) throw new Error(error.message);
     return { ok: true };
   },
@@ -3139,7 +3580,10 @@ export const api = {
     const me = await getAuthenticatedUser();
     if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
     const nextStatus = decision === 'approve' ? 'active' : 'rejected';
-    const { error } = await supabase.from('items').update({ status: nextStatus }).eq('id', itemId);
+    const { error } = await supabase
+      .from('products')
+      .update({ status: nextStatus, is_available: decision === 'approve' })
+      .eq('id', itemId);
     if (error) throw new Error(error.message);
     return { ok: true, status: nextStatus };
   },
@@ -3147,7 +3591,7 @@ export const api = {
   ownerDeleteItem: async (itemId: string) => {
     const me = await getAuthenticatedUser();
     if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
-    const { error } = await supabase.from('items').delete().eq('id', itemId);
+    const { error } = await supabase.from('products').delete().eq('id', itemId);
     if (error) throw new Error(error.message);
     return { ok: true };
   },
@@ -3156,12 +3600,12 @@ export const api = {
     const me = await getAuthenticatedUser();
     if (!isVerifiedOwnerUser(me)) throw new Error('Access Denied');
     if (isUuid(userIdOrPhone)) {
-      await supabase.from('profiles').update({ blocked }).eq('id', userIdOrPhone);
-      await supabase.from('users').update({ blocked }).eq('id', userIdOrPhone).then(() => {});
+      await supabase.from('users').update({ blocked }).eq('id', userIdOrPhone);
+      await supabase.from('profiles').update({ blocked }).eq('id', userIdOrPhone).then(() => {});
     } else {
       const candidates = phoneLookupCandidates(userIdOrPhone);
-      await supabase.from('profiles').update({ blocked }).in('phone_number', candidates);
-      await supabase.from('users').update({ blocked }).in('phone_number', candidates).then(() => {});
+      await supabase.from('users').update({ blocked }).in('phone_number', candidates);
+      await supabase.from('profiles').update({ blocked }).in('phone_number', candidates).then(() => {});
     }
     return { ok: true };
   },
@@ -3178,56 +3622,90 @@ export const api = {
     const me = await getAuthenticatedUser().catch(() => null);
     if (!me) return { buyer_orders: [], seller_orders: [] };
 
-    const { data, error } = await supabase
-      .from('orders')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const [{ data, error }, payRes] = await Promise.all([
+      supabase.from('orders').select('*').order('created_at', { ascending: false }),
+      supabase.from('payments').select('*'),
+    ]);
     if (error || !Array.isArray(data)) return { buyer_orders: [], seller_orders: [] };
 
-    const mapOrder = (o: Record<string, unknown>): EscrowOrder => ({
-      id: String(o.id),
-      reference: String(o.reference || ''),
-      item_id: String(o.item_id || ''),
-      item_title: String(o.item_title || ''),
-      item_photo: String(o.item_photo || ''),
-      item_location: String(o.item_location || ''),
-      buyer_id: String(o.buyer_id || ''),
-      buyer_name: String(o.buyer_name || ''),
-      buyer_email: String(o.buyer_email || ''),
-      seller_id: String(o.seller_id || ''),
-      seller_name: String(o.seller_name || ''),
-      product_price: Number(o.product_price || 0),
-      delivery_fee: Number(o.delivery_fee || 0),
-      total_amount: Number(o.total_amount || 0),
-      admin_commission: Number(o.admin_commission || 0),
-      admin_total_kept: Number(o.admin_total_kept || 0),
-      seller_payout: Number(o.seller_payout || 0),
-      delivery_address: String(o.delivery_address || ''),
-      order_status: String(o.order_status || 'paid_escrow') as EscrowOrder['order_status'],
-      refund_reason: typeof o.refund_reason === 'string' ? o.refund_reason : undefined,
-      refund_photo: typeof o.refund_photo === 'string' ? o.refund_photo : undefined,
-      created_at: String(o.created_at || new Date().toISOString()),
-      shipped_at: typeof o.shipped_at === 'string' ? o.shipped_at : undefined,
-      confirmed_at: typeof o.confirmed_at === 'string' ? o.confirmed_at : undefined,
-    });
+    const paymentByOrderId = new Map<string, { status: string; payment_method: string }>();
+    if (!payRes.error && Array.isArray(payRes.data)) {
+      for (const p of payRes.data as Array<Record<string, unknown>>) {
+        const oid = String(p.order_id || '');
+        if (oid) {
+          paymentByOrderId.set(oid, {
+            status: String(p.status || 'pending'),
+            payment_method: String(p.payment_method || 'Bank Transfer'),
+          });
+        }
+      }
+    }
+
+    const mapOrder = (o: Record<string, unknown>): EscrowOrder => {
+      const id = String(o.id);
+      const payInfo = paymentByOrderId.get(id);
+      const ordStatus = String(o.order_status || 'paid_escrow') as EscrowOrder['order_status'];
+      const simpleStatus: EscrowOrder['status'] =
+        o.status === 'delivered' || ordStatus === 'delivered_confirmed'
+          ? 'delivered'
+          : o.status === 'confirmed' || ordStatus === 'shipped'
+          ? 'confirmed'
+          : 'pending';
+      return {
+        id,
+        reference: String(o.reference || ''),
+        item_id: String(o.product_id || o.item_id || ''),
+        item_title: String(o.item_title || 'Marketplace Product'),
+        item_photo: String(o.item_photo || ''),
+        item_location: String(o.item_location || ''),
+        buyer_id: String(o.buyer_id || ''),
+        buyer_name: String(o.buyer_name || ''),
+        buyer_email: String(o.buyer_email || ''),
+        seller_id: String(o.seller_id || ''),
+        seller_name: String(o.seller_name || ''),
+        quantity: Number(o.quantity || 1),
+        product_price: Number(o.product_price || o.total_price || 0),
+        delivery_fee: Number(o.delivery_fee || 0),
+        total_price: Number(o.total_price || o.product_price || 0),
+        total_amount: Number(o.total_amount || o.total_price || o.total || 0),
+        admin_commission: Number(o.admin_commission || 0),
+        admin_total_kept: Number(o.admin_total_kept || 0),
+        seller_payout: Number(o.seller_payout || 0),
+        delivery_address: String(o.delivery_address || ''),
+        country: typeof o.country === 'string' ? o.country : undefined,
+        status: simpleStatus,
+        payment_method: payInfo?.payment_method || String(o.payment_method || 'Bank Transfer'),
+        payment_status: payInfo?.status || (simpleStatus === 'delivered' ? 'successful' : 'pending'),
+        order_status: ordStatus,
+        refund_reason: typeof o.refund_reason === 'string' ? o.refund_reason : undefined,
+        refund_photo: typeof o.refund_photo === 'string' ? o.refund_photo : undefined,
+        created_at: String(o.created_at || new Date().toISOString()),
+        shipped_at: typeof o.shipped_at === 'string' ? o.shipped_at : undefined,
+        confirmed_at: typeof o.confirmed_at === 'string' ? o.confirmed_at : undefined,
+      };
+    };
 
     const mapped = (data as Array<Record<string, unknown>>).map(mapOrder);
     return {
-      buyer_orders: mapped.filter(
-        (o) => o.buyer_id === me.id
-      ),
+      buyer_orders: mapped.filter((o) => o.buyer_id === me.id),
       seller_orders: mapped.filter(
-        (o) => o.seller_id === me.id || (Boolean(me.phone_number) && (data.find((d) => String((d as Record<string, unknown>).id) === o.id) as Record<string, unknown> | undefined)?.seller_phone === me.phone_number)
+        (o) =>
+          o.seller_id === me.id ||
+          (Boolean(me.phone_number) &&
+            (data.find((d) => String((d as Record<string, unknown>).id) === o.id) as Record<string, unknown> | undefined)
+              ?.seller_phone === me.phone_number)
       ),
     };
   },
 
   createOrder: async (payload: {
     item_id: string;
+    quantity?: number;
     delivery_address: string;
     paystack_reference: string;
     buyer_email?: string;
     delivery_tier?: 'same_city' | 'standard';
+    payment_method?: 'Bank Transfer' | 'Card' | 'Mobile Money';
   }): Promise<{ order: EscrowOrder }> => {
     const me = await getAuthenticatedUser();
     const [item, settingsRes] = await Promise.all([
@@ -3236,59 +3714,114 @@ export const api = {
     ]);
     const commissionPercent = Number(settingsRes.settings.commission_percent ?? 10);
     const cfg = getCountryConfig(item.country || me.country || 'Nigeria');
+    const qty = Math.max(1, Number(payload.quantity || 1));
     const deliveryFee =
       payload.delivery_tier === 'standard' ? cfg.deliveryFeeStandard : cfg.deliveryFeeSameCity;
-    const productPrice = Number(item.price || 0);
-    const totalAmount = productPrice + deliveryFee;
-    const adminCommission = Math.round(productPrice * (commissionPercent / 100));
-    const sellerPayout = productPrice - adminCommission;
+    const totalPrice = Number(item.price || 0) * qty;
+    const totalAmount = totalPrice + deliveryFee;
+    const adminCommission = Math.round(totalPrice * (commissionPercent / 100));
+    const sellerPayout = totalPrice - adminCommission;
     const adminTotalKept = adminCommission + deliveryFee;
+    const paymentMethod = payload.payment_method || 'Card';
 
-    const { data, error } = await supabase
-      .from('orders')
-      .insert({
-        reference: payload.paystack_reference,
-        item_id: item.id,
-        item_title: item.title,
-        item_photo: item.thumbnails?.[0] || item.photos?.[0] || '',
-        item_location: item.location,
-        buyer_id: me.id,
-        buyer_name: me.full_name,
-        buyer_phone: me.phone_number || '',
-        buyer_email: payload.buyer_email || me.email || '',
-        seller_id: isUuid(item.seller_id) ? item.seller_id : null,
-        seller_name: item.seller_name,
-        seller_phone: isUuid(item.seller_id) ? '' : item.seller_id,
-        product_price: productPrice,
-        delivery_fee: deliveryFee,
-        total_amount: totalAmount,
-        admin_commission: adminCommission,
-        admin_total_kept: adminTotalKept,
-        seller_payout: sellerPayout,
-        delivery_address: payload.delivery_address,
-        order_status: 'paid_escrow',
-      })
-      .select('*')
-      .single();
+    const orderInsert = {
+      reference: payload.paystack_reference,
+      product_id: item.id,
+      item_id: item.id,
+      item_title: item.title,
+      item_photo: item.thumbnails?.[0] || item.photos?.[0] || '',
+      item_location: item.location,
+      buyer_id: me.id,
+      buyer_name: me.full_name,
+      buyer_phone: me.phone_number || '',
+      buyer_email: payload.buyer_email || me.email || '',
+      seller_id: isUuid(item.seller_id) ? item.seller_id : null,
+      seller_name: item.seller_name,
+      seller_phone: isUuid(item.seller_id) ? '' : item.seller_id,
+      quantity: qty,
+      product_price: totalPrice,
+      total_price: totalPrice,
+      delivery_fee: deliveryFee,
+      total_amount: totalAmount,
+      total: totalAmount,
+      admin_commission: adminCommission,
+      admin_total_kept: adminTotalKept,
+      seller_payout: sellerPayout,
+      delivery_address: payload.delivery_address,
+      country: item.country || me.country || 'Nigeria',
+      payment_method: paymentMethod,
+      status: 'pending',
+      order_status: 'paid_escrow',
+    };
 
-    if (error || !data) {
-      throw new Error(error?.message || 'Could not record Paystack order in Supabase.');
+    let res = await supabase.from('orders').insert(orderInsert).select('*').single();
+    if (res.error && isMissingColumnError(res.error)) {
+      res = await supabase
+        .from('orders')
+        .insert({
+          reference: payload.paystack_reference,
+          item_id: item.id,
+          item_title: item.title,
+          item_photo: item.thumbnails?.[0] || item.photos?.[0] || '',
+          item_location: item.location,
+          buyer_id: me.id,
+          buyer_name: me.full_name,
+          buyer_phone: me.phone_number || '',
+          buyer_email: payload.buyer_email || me.email || '',
+          seller_id: isUuid(item.seller_id) ? item.seller_id : null,
+          seller_name: item.seller_name,
+          product_price: totalPrice,
+          delivery_fee: deliveryFee,
+          total_amount: totalAmount,
+          admin_commission: adminCommission,
+          admin_total_kept: adminTotalKept,
+          seller_payout: sellerPayout,
+          delivery_address: payload.delivery_address,
+          order_status: 'paid_escrow',
+        })
+        .select('*')
+        .single();
     }
+
+    if (res.error || !res.data) {
+      throw new Error(res.error?.message || 'Could not record order in Supabase.');
+    }
+
+    const o = res.data as Record<string, unknown>;
+    const orderId = String(o.id);
+
+    // Record payment row in public.payments
+    await supabase
+      .from('payments')
+      .insert({
+        order_id: orderId,
+        payer_id: me.id,
+        amount: totalPrice,
+        payment_method: paymentMethod,
+        status: 'pending',
+        buyer_email: payload.buyer_email || me.email || '',
+        buyer_name: me.full_name,
+        seller_name: item.seller_name,
+        product_name: item.title,
+        commission: adminCommission,
+        seller_amount: sellerPayout,
+        paystack_reference: payload.paystack_reference,
+      })
+      .then(() => {});
 
     if (isUuid(item.seller_id) && item.seller_id !== me.id) {
       await createNotificationRecord({
         user_id: item.seller_id,
-        title: `New Escrow Order: ${item.title}`,
-        body: `${me.full_name} paid ${formatCountryMoney(totalAmount, item.country)}. Deliver to ${payload.delivery_address}.`,
+        title: `New Order: ${item.title}`,
+        body: `${me.full_name} ordered ${qty}x (${formatCountryMoney(totalAmount, item.country)}). Deliver to ${payload.delivery_address}.`,
         type: 'order_placed',
       });
     }
 
-    const o = data as Record<string, unknown>;
     return {
       order: {
-        id: String(o.id),
-        reference: String(o.reference),
+        id: orderId,
+        reference: String(o.reference || payload.paystack_reference),
         item_id: item.id,
         item_title: item.title,
         item_photo: String(o.item_photo || ''),
@@ -3298,8 +3831,10 @@ export const api = {
         buyer_email: String(o.buyer_email || ''),
         seller_id: item.seller_id,
         seller_name: item.seller_name,
-        product_price: productPrice,
+        quantity: qty,
+        product_price: totalPrice,
         delivery_fee: deliveryFee,
+        total_price: totalPrice,
         total_amount: totalAmount,
         admin_commission: adminCommission,
         admin_total_kept: adminTotalKept,
@@ -3307,26 +3842,78 @@ export const api = {
         delivery_address: payload.delivery_address,
         country: item.country,
         currency_symbol: cfg.currencySymbol,
+        status: 'pending',
+        payment_method: paymentMethod,
+        payment_status: 'pending',
         order_status: 'paid_escrow',
         created_at: String(o.created_at || new Date().toISOString()),
       },
     };
   },
 
+  updateOrderStatus: async (
+    orderId: string,
+    nextStatus: 'pending' | 'confirmed' | 'delivered'
+  ): Promise<{ ok: boolean }> => {
+    const orderStatusMapped: EscrowOrder['order_status'] =
+      nextStatus === 'delivered'
+        ? 'delivered_confirmed'
+        : nextStatus === 'confirmed'
+        ? 'shipped'
+        : 'paid_escrow';
+
+    const updateFields: Record<string, unknown> = {
+      status: nextStatus,
+      order_status: orderStatusMapped,
+      ...(nextStatus === 'confirmed' ? { shipped_at: new Date().toISOString() } : {}),
+      ...(nextStatus === 'delivered' ? { confirmed_at: new Date().toISOString() } : {}),
+    };
+
+    let upd = await supabase.from('orders').update(updateFields).eq('id', orderId).select('*').single();
+    if (upd.error && isMissingColumnError(upd.error)) {
+      upd = await supabase.from('orders').update({ order_status: orderStatusMapped }).eq('id', orderId).select('*').single();
+    }
+    if (upd.error) throw new Error(upd.error.message);
+
+    if (nextStatus === 'delivered') {
+      await supabase.from('payments').update({ status: 'successful' }).eq('order_id', orderId).then(() => {});
+    }
+
+    const o = (upd.data || {}) as Record<string, unknown>;
+    if (typeof o.buyer_id === 'string' && isUuid(o.buyer_id)) {
+      await createNotificationRecord({
+        user_id: o.buyer_id,
+        title: `Order ${nextStatus}: ${String(o.item_title || 'Your item')}`,
+        body: `Your order status is now ${nextStatus}.`,
+        type: nextStatus === 'delivered' ? 'order_confirmed' : 'order_shipped',
+      });
+    }
+    return { ok: true };
+  },
+
   markOrderShipped: async (orderId: string): Promise<{ order: EscrowOrder }> => {
-    const { data, error } = await supabase
+    let res = await supabase
       .from('orders')
-      .update({ order_status: 'shipped', shipped_at: new Date().toISOString() })
+      .update({ status: 'confirmed', order_status: 'shipped', shipped_at: new Date().toISOString() })
       .eq('id', orderId)
       .select('*')
       .single();
+    if (res.error && isMissingColumnError(res.error)) {
+      res = await supabase
+        .from('orders')
+        .update({ order_status: 'shipped', shipped_at: new Date().toISOString() })
+        .eq('id', orderId)
+        .select('*')
+        .single();
+    }
+    const { data, error } = res;
     if (error || !data) throw new Error(error?.message || 'Failed to update order.');
     const o = data as Record<string, unknown>;
     if (typeof o.buyer_id === 'string' && isUuid(o.buyer_id)) {
       await createNotificationRecord({
         user_id: o.buyer_id,
-        title: `Order Shipped: ${String(o.item_title || 'Your item')}`,
-        body: `Seller marked order ${String(o.reference || '')} as shipped. Confirm receipt once delivered.`,
+        title: `Order Confirmed / Shipped: ${String(o.item_title || 'Your item')}`,
+        body: `Seller confirmed & shipped order ${String(o.reference || '')}. Confirm receipt once delivered.`,
         type: 'order_shipped',
       });
     }
@@ -3334,7 +3921,7 @@ export const api = {
       order: {
         id: String(o.id),
         reference: String(o.reference || ''),
-        item_id: String(o.item_id || ''),
+        item_id: String(o.product_id || o.item_id || ''),
         item_title: String(o.item_title || ''),
         item_photo: String(o.item_photo || ''),
         item_location: String(o.item_location || ''),
@@ -3343,13 +3930,16 @@ export const api = {
         buyer_email: String(o.buyer_email || ''),
         seller_id: String(o.seller_id || ''),
         seller_name: String(o.seller_name || ''),
+        quantity: Number(o.quantity || 1),
         product_price: Number(o.product_price || 0),
         delivery_fee: Number(o.delivery_fee || 0),
+        total_price: Number(o.total_price || o.product_price || 0),
         total_amount: Number(o.total_amount || 0),
         admin_commission: Number(o.admin_commission || 0),
         admin_total_kept: Number(o.admin_total_kept || 0),
         seller_payout: Number(o.seller_payout || 0),
         delivery_address: String(o.delivery_address || ''),
+        status: 'confirmed',
         order_status: 'shipped',
         created_at: String(o.created_at || new Date().toISOString()),
         shipped_at: String(o.shipped_at || new Date().toISOString()),
@@ -3358,13 +3948,25 @@ export const api = {
   },
 
   confirmOrderDelivery: async (orderId: string): Promise<{ order: EscrowOrder }> => {
-    const { data, error } = await supabase
+    let res = await supabase
       .from('orders')
-      .update({ order_status: 'delivered_confirmed', confirmed_at: new Date().toISOString() })
+      .update({ status: 'delivered', order_status: 'delivered_confirmed', confirmed_at: new Date().toISOString() })
       .eq('id', orderId)
       .select('*')
       .single();
+    if (res.error && isMissingColumnError(res.error)) {
+      res = await supabase
+        .from('orders')
+        .update({ order_status: 'delivered_confirmed', confirmed_at: new Date().toISOString() })
+        .eq('id', orderId)
+        .select('*')
+        .single();
+    }
+    const { data, error } = res;
     if (error || !data) throw new Error(error?.message || 'Failed to confirm delivery.');
+
+    await supabase.from('payments').update({ status: 'successful' }).eq('order_id', orderId).then(() => {});
+
     const o = data as Record<string, unknown>;
     if (typeof o.seller_id === 'string' && isUuid(o.seller_id)) {
       await createNotificationRecord({
@@ -3378,7 +3980,7 @@ export const api = {
       order: {
         id: String(o.id),
         reference: String(o.reference || ''),
-        item_id: String(o.item_id || ''),
+        item_id: String(o.product_id || o.item_id || ''),
         item_title: String(o.item_title || ''),
         item_photo: String(o.item_photo || ''),
         item_location: String(o.item_location || ''),
@@ -3387,13 +3989,17 @@ export const api = {
         buyer_email: String(o.buyer_email || ''),
         seller_id: String(o.seller_id || ''),
         seller_name: String(o.seller_name || ''),
+        quantity: Number(o.quantity || 1),
         product_price: Number(o.product_price || 0),
         delivery_fee: Number(o.delivery_fee || 0),
+        total_price: Number(o.total_price || o.product_price || 0),
         total_amount: Number(o.total_amount || 0),
         admin_commission: Number(o.admin_commission || 0),
         admin_total_kept: Number(o.admin_total_kept || 0),
         seller_payout: Number(o.seller_payout || 0),
         delivery_address: String(o.delivery_address || ''),
+        status: 'delivered',
+        payment_status: 'successful',
         order_status: 'delivered_confirmed',
         created_at: String(o.created_at || new Date().toISOString()),
         confirmed_at: String(o.confirmed_at || new Date().toISOString()),
@@ -3553,7 +4159,7 @@ export const api = {
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
-      .eq('user_id', me.id)
+      .or(me.email ? `user_id.eq.${me.id},user_email.ilike.${me.email}` : `user_id.eq.${me.id}`)
       .order('created_at', { ascending: false })
       .limit(40);
 
@@ -3563,9 +4169,9 @@ export const api = {
           id: String(r.id),
           user_id: String(r.user_id || me.id),
           title: String(r.title || 'Update'),
-          body: String(r.body || ''),
+          body: String(r.body || r.message || ''),
           type: String(r.type || 'info') as NotificationType,
-          read: Boolean(r.read),
+          read: Boolean(r.read ?? r.is_read),
           created_at: String(r.created_at || new Date().toISOString()),
         });
       }

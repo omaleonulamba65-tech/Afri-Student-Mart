@@ -1,31 +1,37 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://ais-pre-uqevg5q5ewxm5mb6rg2mut-895254107784.europe-west2.run.app/</loc>
+    <loc>https://afristudentmartjpg.netlify.app/</loc>
     <lastmod>2026-11-19</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://ais-pre-uqevg5q5ewxm5mb6rg2mut-895254107784.europe-west2.run.app/?tab=markets</loc>
+    <loc>https://afristudentmartjpg.netlify.app/?tab=markets</loc>
     <lastmod>2026-11-19</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://ais-pre-uqevg5q5ewxm5mb6rg2mut-895254107784.europe-west2.run.app/?tab=services</loc>
+    <loc>https://afristudentmartjpg.netlify.app/?tab=services</loc>
     <lastmod>2026-11-19</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://ais-pre-uqevg5q5ewxm5mb6rg2mut-895254107784.europe-west2.run.app/?tab=shop</loc>
+    <loc>https://afristudentmartjpg.netlify.app/?tab=shop</loc>
     <lastmod>2026-11-19</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://ais-pre-uqevg5q5ewxm5mb6rg2mut-895254107784.europe-west2.run.app/?tab=post</loc>
+    <loc>https://afristudentmartjpg.netlify.app/?tab=live</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://afristudentmartjpg.netlify.app/?tab=post</loc>
     <lastmod>2026-11-19</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>

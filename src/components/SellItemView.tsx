@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Camera,
   CheckCircle2,
@@ -38,6 +38,8 @@ export const SellItemView: React.FC<SellItemViewProps> = ({
   const [condition, setCondition] = useState<ItemCondition>('Neatly Used');
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState(user?.campus || '');
+  const [myShopId, setMyShopId] = useState<string>('');
+  const [myShopName, setMyShopName] = useState<string>('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [thumbnails, setThumbnails] = useState<string[]>([]);
   const [videoUrl, setVideoUrl] = useState('');
@@ -52,6 +54,24 @@ export const SellItemView: React.FC<SellItemViewProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (!user) {
+      setMyShopId('');
+      setMyShopName('');
+      return;
+    }
+    setLocation((prev) => prev || user.campus || user.state_city || '');
+    api
+      .getMyShop()
+      .then((res) => {
+        if (res.shop) {
+          setMyShopId(res.shop.id);
+          setMyShopName(res.shop.shop_name);
+        }
+      })
+      .catch(() => {});
+  }, [user?.id, user?.campus, user?.state_city]);
+
   if (!user) {
     return (
       <div className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-center space-y-4 my-6">
@@ -60,7 +80,7 @@ export const SellItemView: React.FC<SellItemViewProps> = ({
         </div>
         <h2 className="text-xl font-extrabold text-slate-900">Post Item for Free</h2>
         <p className="text-sm text-slate-600">
-          Free listing for all Students, Traders &amp; Service Providers. Sign up with your phone number to upload photos and live video.
+          Free listing for all Students, Traders &amp; Service Providers. Sign up to upload product photos and start selling.
         </p>
         <button
           type="button"
@@ -86,7 +106,13 @@ export const SellItemView: React.FC<SellItemViewProps> = ({
 
     setCompressingImage(true);
     try {
-      const results = await Promise.all(files.slice(0, remaining).map((f) => compressDualImage(f)));
+      const results = await Promise.all(
+        files.slice(0, remaining).map(async (f) => {
+          const dual = await compressDualImage(f);
+          const storedUrl = await api.uploadProductImage(dual.full).catch(() => dual.full);
+          return { full: storedUrl, thumbnail: dual.thumbnail };
+        })
+      );
       setPhotos((prev) => [...prev, ...results.map((r) => r.full)].slice(0, 4));
       setThumbnails((prev) => [...prev, ...results.map((r) => r.thumbnail)].slice(0, 4));
     } catch (err) {
@@ -138,25 +164,22 @@ export const SellItemView: React.FC<SellItemViewProps> = ({
     setError('');
 
     if (compressingImage || compressingVideo) {
-      setError('Please wait for image/video compression to finish.');
+      setError('Please wait for image/video upload to finish.');
       return;
     }
     if (photos.length === 0) {
-      setError('Please upload at least 1 real photo of your item (compressed <=200KB).');
-      return;
-    }
-    if (!videoUrl) {
-      setError('Live Video Required: Please record or upload a short video (max 720p, 10s, 5MB) of your item.');
+      setError('Please upload at least 1 real photo of your item.');
       return;
     }
     if (!confirmRealPhotos) {
-      setError('Please confirm that your photos & video are real and the condition is true.');
+      setError('Please confirm that your photos are real and the condition is true.');
       return;
     }
 
     setSubmitting(true);
     try {
       const res = await api.createItem({
+        shop_id: myShopId || undefined,
         title,
         category,
         price: Number(price),
@@ -164,7 +187,7 @@ export const SellItemView: React.FC<SellItemViewProps> = ({
         description,
         photos,
         thumbnails,
-        video_url: videoUrl,
+        video_url: videoUrl || undefined,
         make_offer: makeOffer,
         pay_on_delivery: payOnDelivery,
         institution: user.institution,
@@ -195,6 +218,7 @@ export const SellItemView: React.FC<SellItemViewProps> = ({
             <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900">Post Item</h2>
             <p className="text-sm text-slate-600 mt-0.5">
               Live in <span className="font-semibold text-green-800">{user.institution}</span>
+              {myShopName ? ` · Shop: ${myShopName}` : ''}
             </p>
           </div>
           <span className="rounded-lg bg-green-100 px-3 py-1 text-xs font-extrabold text-green-800">
@@ -209,15 +233,15 @@ export const SellItemView: React.FC<SellItemViewProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-5">
-          {/* Photos (up to 4, compressed to 800px <=200KB + 200px <=30KB thumbnails) */}
+          {/* Photos (up to 4, compressed + uploaded to product-images Storage bucket) */}
           <div>
             <label className="block text-sm font-bold text-slate-900 mb-1.5">
-              Real Photos ({photos.length}/4) — Auto-compressed (800px &le;200KB + 200px thumbnail)
+              Product Photos ({photos.length}/4) — Uploaded to Supabase Storage
             </label>
             {compressingImage && (
               <div className="mb-2.5 rounded-xl bg-green-50 border border-green-300 px-3.5 py-2.5 text-xs font-bold text-green-900 flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin text-green-700" />
-                <span>Compressing image... (resizing to max 800px &amp; &le;200KB WebP/JPEG)</span>
+                <span>Uploading photo to product-images...</span>
               </div>
             )}
             <div className="grid grid-cols-4 gap-2.5">
@@ -263,17 +287,17 @@ export const SellItemView: React.FC<SellItemViewProps> = ({
             </div>
           </div>
 
-          {/* Live Video (Required: max 720p, max 10s, max 5MB) */}
-          <div className="rounded-xl border-2 border-blue-300 bg-blue-50/60 p-3.5 space-y-2.5">
+          {/* Live Video (Optional / Recommended: max 720p, max 10s, max 5MB) */}
+          <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3.5 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Video className="w-5 h-5 text-blue-600 shrink-0" />
                 <div>
                   <div className="text-sm font-extrabold text-slate-900">
-                    Live Video Required *
+                    Product Video (Optional)
                   </div>
                   <div className="text-xs text-slate-600">
-                    Max 720p, max 10 seconds, max 5MB. Proves item is real.
+                    Max 720p, max 10 seconds, max 5MB. Builds buyer trust.
                   </div>
                 </div>
               </div>
@@ -509,7 +533,7 @@ export const SellItemView: React.FC<SellItemViewProps> = ({
               className="mt-1 h-5 w-5 accent-green-700 rounded"
             />
             <span className="text-sm text-slate-800 leading-snug">
-              I confirm these are <strong>real photos &amp; live video</strong> of my item, the condition is true, and I am not posting any prohibited item or phone number.
+              I confirm these are <strong>real photos</strong> (and video if added) of my item, the condition is true, and I am not posting any prohibited item or phone number.
             </span>
           </label>
 

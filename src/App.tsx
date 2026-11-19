@@ -111,10 +111,17 @@ const ServicesView = lazy(() =>
 const ShopView = lazy(() =>
   import('./components/ShopView').then((m) => ({ default: m.ShopView }))
 );
+const LiveVideosView = lazy(() =>
+  import('./components/LiveVideosView').then((m) => ({ default: m.LiveVideosView }))
+);
 
 const QUICK_CAT_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Shoes: Footprints,
   Clothes: Shirt,
+  Bags: ShoppingCart,
+  Textbooks: BookOpen,
+  'Phone Accessories': Smartphone,
+  'Beauty Products': Sparkles,
   Phones: Smartphone,
   Food: Utensils,
   Books: BookOpen,
@@ -135,14 +142,20 @@ function matchesSmartCategory(itemCategory: string, selectedCategory: string): b
   const cat = itemCategory.toLowerCase();
   if (selectedCategory === 'Shoes') return cat.includes('shoe') || cat.includes('fashion');
   if (selectedCategory === 'Clothes') return cat.includes('cloth') || cat.includes('fashion');
+  if (selectedCategory === 'Bags') return cat.includes('bag') || cat.includes('fashion');
+  if (selectedCategory === 'Textbooks') return cat.includes('textbook') || cat.includes('book');
+  if (selectedCategory === 'Phone Accessories')
+    return cat.includes('phone') || cat.includes('accessor') || cat.includes('electronic');
+  if (selectedCategory === 'Beauty Products')
+    return cat.includes('beauty') || cat.includes('cosmetic') || cat.includes('skin');
   if (selectedCategory === 'Fashion')
-    return cat.includes('fashion') || cat.includes('shoe') || cat.includes('cloth');
+    return cat.includes('fashion') || cat.includes('shoe') || cat.includes('cloth') || cat.includes('bag');
   if (selectedCategory === 'Phones') return cat.includes('phone') || cat.includes('electronic');
   if (selectedCategory === 'Electronics')
     return cat.includes('electronic') || cat.includes('phone') || cat.includes('laptop');
   if (selectedCategory === 'Food') return cat.includes('food');
   if (selectedCategory === 'Foodstuff') return cat.includes('food');
-  if (selectedCategory === 'Books') return cat.includes('book');
+  if (selectedCategory === 'Books') return cat.includes('book') || cat.includes('textbook');
   if (selectedCategory === 'Hostel Items') return cat.includes('hostel');
   return false;
 }
@@ -741,9 +754,9 @@ export default function App() {
 
   const handleBuyNow = (item: MarketplaceItem) => {
     if (!user) {
-      setAuthMode('login');
+      setAuthMode('signup');
       setAuthModalOpen(true);
-      showToast('Please login or create a free account to pay safely via Paystack.');
+      showToast('Sign up or login free to place your order.');
       return;
     }
     if (item.seller_id === user.id) {
@@ -1095,6 +1108,7 @@ export default function App() {
                 ['home', t('nav_home')],
                 ['markets', t('nav_markets')],
                 ['post', t('nav_post')],
+                ['live', 'Live'],
                 ['chat', t('nav_chat')],
                 ['services', t('nav_services')],
                 ['shop', t('nav_shop')],
@@ -1489,6 +1503,21 @@ export default function App() {
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCountryOnly('All');
+                        setSelectedState('All');
+                        setSelectedInstitution('All');
+                      }}
+                      className={`min-h-[38px] px-3 rounded-lg border text-xs font-extrabold whitespace-nowrap ${
+                        country === 'All'
+                          ? 'bg-green-700 text-white border-green-700'
+                          : 'bg-slate-50 border-slate-300 text-slate-800 hover:border-green-700'
+                      }`}
+                    >
+                      🌍 All Africa
+                    </button>
                     <select
                       aria-label={t('country_label')}
                       value={country}
@@ -2054,6 +2083,20 @@ export default function App() {
               </Suspense>
             )}
 
+            {/* === LIVE VIDEOS TAB === */}
+            {activeTab === 'live' && (
+              <Suspense fallback={<TabFallback />}>
+                <LiveVideosView
+                  user={user}
+                  onRequireAuth={() => {
+                    setAuthMode('signup');
+                    setAuthModalOpen(true);
+                  }}
+                  onNotice={showToast}
+                />
+              </Suspense>
+            )}
+
             {/* === CHAT TAB === */}
             {activeTab === 'chat' && (
               <Suspense fallback={<TabFallback />}>
@@ -2260,9 +2303,9 @@ export default function App() {
             onCheckoutAll={() => {
               if (!user) {
                 setCartOpen(false);
-                setAuthMode('login');
+                setAuthMode('signup');
                 setAuthModalOpen(true);
-                showToast('Please login or create a free account to pay safely via Paystack.');
+                showToast('Sign up or login free to complete your order.');
                 return;
               }
               setCartOpen(false);

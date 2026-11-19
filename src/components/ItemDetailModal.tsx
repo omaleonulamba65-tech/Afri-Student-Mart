@@ -114,7 +114,9 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
           try {
             const ordRes = await api.getOrders();
             eligible = (ordRes.buyer_orders || []).some(
-              (o) => o.item_id === item.id && o.order_status === 'delivered_confirmed'
+              (o) =>
+                o.item_id === item.id &&
+                (o.order_status === 'delivered_confirmed' || o.status === 'delivered')
             );
           } catch {
             // Keep backend flag
@@ -128,8 +130,6 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
       .finally(() => {
         if (!cancelled) setLoadingTrust(false);
       });
-
-    if (lowDataMode) return () => { cancelled = true; };
 
     setLoadingFull(true);
     api
@@ -147,7 +147,7 @@ export const ItemDetailModal: React.FC<ItemDetailModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [item?.id, lowDataMode]);
+  }, [item?.id]);
 
   if (!item) return null;
 

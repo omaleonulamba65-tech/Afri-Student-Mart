@@ -55,6 +55,7 @@ export const COUNTRY_LANGUAGE_CONFIGS: CountryLanguageConfig[] = [
     deliveryFeeStandard: 20,
     languages: [
       'English',
+      'Twi',
       'Twi / Akan',
       'Fante',
       'Ewe',
@@ -1459,6 +1460,7 @@ const LANGUAGE_DICT_MAP: Record<string, TranslationDict> = {
   'Edo / Bini': EDO,
   Urhobo: IJAW,
   Kalabari: IJAW,
+  Twi: TWI,
   'Twi / Akan': TWI,
   Fante: TWI,
   Bono: TWI,

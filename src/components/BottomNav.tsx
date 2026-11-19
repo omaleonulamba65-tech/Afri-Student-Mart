@@ -1,8 +1,8 @@
 import React from 'react';
-import { Home, MessageCircle, PlusCircle, Store, User, Wrench } from 'lucide-react';
+import { Home, MessageCircle, PlusCircle, Radio, Store, User, Wrench } from 'lucide-react';
 import { useI18n } from '../lib/i18nContext';
 
-export type NavTab = 'home' | 'markets' | 'post' | 'chat' | 'services' | 'shop' | 'profile';
+export type NavTab = 'home' | 'markets' | 'post' | 'live' | 'chat' | 'services' | 'shop' | 'profile';
 
 interface BottomNavProps {
   activeTab: NavTab;
@@ -19,6 +19,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   const items: Array<{ id: NavTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { id: 'home', label: t('nav_home'), icon: Home },
     { id: 'post', label: t('nav_post'), icon: PlusCircle },
+    { id: 'live', label: 'Live', icon: Radio },
     { id: 'chat', label: t('nav_chat'), icon: MessageCircle },
     { id: 'services', label: t('nav_services'), icon: Wrench },
     { id: 'shop', label: t('nav_shop'), icon: Store },
@@ -30,7 +31,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       aria-label="Primary mobile navigation"
       className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 pb-safe"
     >
-      <div className="grid grid-cols-6 h-16 items-center">
+      <div className="grid grid-cols-7 h-16 items-center">
         {items.map((item) => {
           const active = activeTab === item.id;
           const Icon = item.icon;

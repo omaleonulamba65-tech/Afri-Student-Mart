@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Camera,
   CheckCircle2,
+  Globe,
   MapPin,
   Megaphone,
   MessageCircle,
@@ -11,6 +12,7 @@ import {
   User,
   Wrench,
 } from 'lucide-react';
+import { COUNTRY_LANGUAGE_CONFIGS, getCountryConfig, getCountryDisplayName } from '../data/languages';
 import { api, compressImageFile } from '../lib/api';
 import { useI18n } from '../lib/i18nContext';
 import {
@@ -35,7 +37,8 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
   onChatService,
   onNotice,
 }) => {
-  const { countryConfig, formatMoney, t } = useI18n();
+  const { country: globalCountry, countryConfig, formatMoney, t } = useI18n();
+  const [filterCountry, setFilterCountry] = useState<string>(globalCountry || 'All');
   const [services, setServices] = useState<ServiceProvider[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -46,31 +49,41 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
   const [svcTitle, setSvcTitle] = useState('');
   const [svcCategory, setSvcCategory] = useState<string>(SERVICE_CATEGORIES[0]);
   const [svcPriceFrom, setSvcPriceFrom] = useState('2000');
-  const [svcLocation, setSvcLocation] = useState(user?.campus || '');
+  const [svcCountry, setSvcCountry] = useState(
+    user?.country || (globalCountry === 'All' ? 'Nigeria' : globalCountry)
+  );
+  const [svcLocation, setSvcLocation] = useState(user?.state_city || user?.campus || '');
   const [svcDesc, setSvcDesc] = useState('');
   const [svcPhotos, setSvcPhotos] = useState<string[]>([]);
   const [publishingSvc, setPublishingSvc] = useState(false);
   const [errMsg, setErrMsg] = useState('');
 
-  const loadServices = async () => {
+  useEffect(() => {
+    setFilterCountry(globalCountry || 'All');
+  }, [globalCountry]);
+
+  const loadServices = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.getServices();
+      const res = await api.getServices({
+        country: filterCountry === 'All' ? undefined : filterCountry,
+      });
       setServices(res.services);
     } catch {
       // Keep current
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterCountry]);
 
   useEffect(() => {
-    loadServices();
-  }, []);
+    void loadServices();
+  }, [loadServices]);
 
   useEffect(() => {
     if (user) {
-      setSvcLocation((prev) => prev || user.campus);
+      setSvcCountry(user.country || 'Nigeria');
+      setSvcLocation((prev) => prev || user.state_city || user.campus);
     }
   }, [user?.id]);
 
@@ -83,7 +96,8 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
           s.title.toLowerCase().includes(q) ||
           s.provider_name.toLowerCase().includes(q) ||
           s.category.toLowerCase().includes(q) ||
-          s.location.toLowerCase().includes(q);
+          s.location.toLowerCase().includes(q) ||
+          (s.state_city || '').toLowerCase().includes(q);
         if (!hit) return false;
       }
       return true;
@@ -95,13 +109,16 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
     if (!files.length) return;
     const rem = 4 - svcPhotos.length;
     if (rem <= 0) return;
-    onNotice('Compressing image...');
+    onNotice('Uploading service photo...');
     try {
-      const compressed = await Promise.all(
-        files.slice(0, rem).map((f) => compressImageFile(f, 800, 200 * 1024))
+      const uploaded = await Promise.all(
+        files.slice(0, rem).map(async (f) => {
+          const compressed = await compressImageFile(f, 800, 200 * 1024);
+          return api.uploadProductImage(compressed).catch(() => compressed);
+        })
       );
-      setSvcPhotos((prev) => [...prev, ...compressed].slice(0, 4));
-      onNotice('Service photo compressed (<=200KB).');
+      setSvcPhotos((prev) => [...prev, ...uploaded].slice(0, 4));
+      onNotice('Service photo ready.');
     } catch (err) {
       setErrMsg(err instanceof Error ? err.message : 'Photo error.');
     }
@@ -122,6 +139,8 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
         category: svcCategory,
         description: svcDesc,
         price_from: Number(svcPriceFrom || 1500),
+        country: svcCountry,
+        state_city: svcLocation || user.state_city || user.campus,
         location: svcLocation || user.campus,
         work_photos: svcPhotos,
         offerings: [
@@ -190,6 +209,34 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
             className="w-full min-h-[50px] rounded-2xl bg-white text-slate-900 pl-12 pr-4 text-base font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400"
           />
         </form>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setFilterCountry('All')}
+            className={`min-h-[38px] px-3.5 rounded-xl text-xs font-extrabold inline-flex items-center gap-1.5 border transition-colors ${
+              filterCountry === 'All'
+                ? 'bg-yellow-400 text-green-950 border-yellow-400'
+                : 'bg-white/15 text-white border-white/30 hover:bg-white/25'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>All Africa</span>
+          </button>
+          <select
+            aria-label="Filter services by country"
+            value={filterCountry}
+            onChange={(e) => setFilterCountry(e.target.value)}
+            className="min-h-[38px] rounded-xl border border-white/30 bg-white text-slate-900 px-3 text-xs sm:text-sm font-bold"
+          >
+            <option value="All">All Africa</option>
+            {COUNTRY_LANGUAGE_CONFIGS.map((cfg) => (
+              <option key={cfg.country} value={cfg.country}>
+                {cfg.flag} {getCountryDisplayName(cfg.country)}
+              </option>
+            ))}
+          </select>
+        </div>
       </section>
 
       {errMsg && (
@@ -254,13 +301,27 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Location</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Country</label>
+              <select
+                value={svcCountry}
+                onChange={(e) => setSvcCountry(e.target.value)}
+                className="w-full min-h-[46px] rounded-xl border border-slate-300 px-3 text-sm bg-white font-semibold"
+              >
+                {COUNTRY_LANGUAGE_CONFIGS.map((cfg) => (
+                  <option key={cfg.country} value={cfg.country}>
+                    {cfg.flag} {getCountryDisplayName(cfg.country)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">State / City / Campus</label>
               <input
                 type="text"
                 required
                 value={svcLocation}
                 onChange={(e) => setSvcLocation(e.target.value)}
-                placeholder="e.g. Moremi Hall / Gate"
+                placeholder="e.g. Abuja, Lagos, Accra"
                 className="w-full min-h-[46px] rounded-xl border border-slate-300 px-3 text-sm"
               />
             </div>
@@ -424,14 +485,15 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                       <span className="text-slate-500">({svc.reviews_count} reviews)</span>
                     </div>
                     <div className="font-extrabold text-green-800 tabular-nums">
-                      From {formatMoney(svc.price_from)}
+                      From {formatMoney(svc.price_from, svc.country)}
                     </div>
                   </div>
 
                   <div className="flex items-center gap-1 text-xs text-slate-500 truncate">
                     <MapPin className="w-3.5 h-3.5 text-green-700 shrink-0" />
                     <span className="truncate">
-                      {svc.location} · {svc.distance_km} km away
+                      {svc.country ? `${getCountryConfig(svc.country).flag} ${getCountryDisplayName(svc.country)} · ` : ''}
+                      {svc.state_city || svc.location}
                     </span>
                   </div>
                 </div>
@@ -447,7 +509,13 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onOpenServiceProfile(svc)}
+                    onClick={() => {
+                      if (!user) {
+                        onRequireAuth();
+                      } else {
+                        onOpenServiceProfile(svc);
+                      }
+                    }}
                     className="min-h-[44px] rounded-xl bg-green-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-green-800"
                   >
                     <CheckCircle2 className="w-4 h-4" />
